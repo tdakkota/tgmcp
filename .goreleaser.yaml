@@ -1,0 +1,73 @@
+version: 2
+project_name: tgmcp
+
+builds:
+  - id: tgmcp
+    main: .
+    binary: "tgmcp{{ .Ext }}"
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - riscv64
+
+archives:
+  - formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    builds_info:
+      group: root
+      owner: root
+    files:
+      - README.md
+      - LICENSE
+
+dockers_v2:
+  - id: tgmcp
+    ids: [tgmcp]
+    images:
+      - "ghcr.io/gotd/tgmcp"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    tags:
+      - "{{ .Version }}"
+      - "latest"
+    dockerfile: Dockerfile.goreleaser
+    labels:
+      "org.opencontainers.image.description": "MCP server for reading unread Telegram channel messages"
+      "org.opencontainers.image.created": "{{ .Date }}"
+      "org.opencontainers.image.name": "{{ .ProjectName }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "org.opencontainers.image.source": "{{ .GitURL }}"
+      "org.opencontainers.image.version": "{{ .Version }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^chore:"
+      - "^test:"
+      - "Merge pull request"
+      - "Merge branch"
+      - "go mod tidy"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+release:
+  github:
+    owner: gotd
+    name: tgmcp
+  mode: replace
+  draft: false
+  prerelease: auto
