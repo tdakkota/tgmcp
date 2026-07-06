@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1
+FROM alpine:3.22
+
+ARG TARGETPLATFORM
+
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -S tgmcp \
+    && adduser -S tgmcp -G tgmcp -h /home/tgmcp
+
+WORKDIR /home/tgmcp
+
+COPY ${TARGETPLATFORM}/tgmcp /usr/local/bin/tgmcp
+
+USER tgmcp
+
+ENTRYPOINT ["/usr/local/bin/tgmcp"]
