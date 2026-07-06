@@ -31,15 +31,17 @@ type (
 	entities   = peer.Entities
 )
 
-// UnreadChannel describes a channel (or supergroup) that has unread messages.
+// UnreadChannel describes a dialog (channel, supergroup, group or private chat)
+// that has unread messages.
 type UnreadChannel struct {
-	ID          int64  `json:"id" jsonschema:"Telegram channel ID"`
-	Title       string `json:"title" jsonschema:"channel title"`
+	ID          int64  `json:"id" jsonschema:"Telegram dialog ID"`
+	Title       string `json:"title" jsonschema:"dialog title"`
 	Username    string `json:"username,omitempty" jsonschema:"public @username, if any"`
 	UnreadCount int    `json:"unread_count" jsonschema:"number of unread messages"`
 	UnreadMark  bool   `json:"unread_mark,omitempty" jsonschema:"true if manually marked as unread"`
 	Broadcast   bool   `json:"broadcast" jsonschema:"true for broadcast channels"`
 	Megagroup   bool   `json:"megagroup" jsonschema:"true for supergroups"`
+	Type        string `json:"type" jsonschema:"dialog type: private, group, supergroup or channel"`
 
 	// readInboxMaxID is the ID of the last message marked as read. Messages with
 	// a greater ID are unread. Kept unexported: it is an implementation detail.
@@ -49,10 +51,12 @@ type UnreadChannel struct {
 
 // Message is a single message returned to the MCP client.
 type Message struct {
-	ID     int    `json:"id" jsonschema:"message ID"`
-	Date   string `json:"date" jsonschema:"send time in RFC3339"`
-	Text   string `json:"text" jsonschema:"message text"`
-	Author string `json:"author,omitempty" jsonschema:"sender name, for groups"`
+	ID        int    `json:"id" jsonschema:"message ID"`
+	Date      string `json:"date" jsonschema:"send time in RFC3339"`
+	Text      string `json:"text" jsonschema:"message text"`
+	Author    string `json:"author,omitempty" jsonschema:"sender name, for groups"`
+	Out       bool   `json:"out,omitempty" jsonschema:"true if outgoing"`
+	ReplyToID int    `json:"reply_to_id,omitempty" jsonschema:"ID of message being replied to"`
 }
 
 // bootstrapDialogs loads the full dialog list once and seeds the cache. It
@@ -135,6 +139,9 @@ func readUnread(ctx context.Context, api *tg.Client, cache *dialogCache, msgs *m
 	if !ok {
 		return UnreadChannel{}, nil, errors.Errorf("channel %q not found in dialogs", target)
 	}
+	if !ch.Broadcast {
+		return UnreadChannel{}, nil, errors.Errorf("channel %q is not a broadcast channel", target)
+	}
 
 	// Buffer first: the buffer always holds a contiguous newest suffix, so it is
 	// authoritative when it has at least `limit` unread, or all of them.
@@ -173,7 +180,7 @@ func readUnread(ctx context.Context, api *tg.Client, cache *dialogCache, msgs *m
 // newest first, capped at limit.
 func fetchUnreadHistory(ctx context.Context, api *tg.Client, cache *dialogCache, ch UnreadChannel, limit int) ([]Message, error) {
 	var out []Message
-	iter := messages.NewQueryBuilder(api).GetHistory(ch.peer).Iter()
+	iter := messages.NewQueryBuilder(api).GetHistory(ch.peer).BatchSize(min(limit, 100)).Iter()
 	for iter.Next(ctx) {
 		msg, ok := iter.Value().Msg.(*tg.Message)
 		if !ok {
@@ -203,39 +210,75 @@ func fetchUnreadHistory(ctx context.Context, api *tg.Client, cache *dialogCache,
 	return out, nil
 }
 
-// channelFromDialog extracts channel information from a dialog element,
-// regardless of unread state. Returns false for non-channel dialogs.
+// channelFromDialog extracts dialog information from a dialog element,
+// regardless of unread state. Returns false for unsupported dialogs.
 func channelFromDialog(elem dialogElem) (UnreadChannel, bool) {
 	dlg, ok := elem.Dialog.(*tg.Dialog)
 	if !ok {
 		return UnreadChannel{}, false
 	}
-	pc, ok := dlg.Peer.(*tg.PeerChannel)
-	if !ok {
-		return UnreadChannel{}, false
-	}
-	c, ok := elem.Entities.Channel(pc.ChannelID)
-	if !ok {
-		return UnreadChannel{}, false
-	}
 
-	// Ignore group chats (supergroups): tgmcp tracks broadcast channels only.
-	if !c.Broadcast {
+	switch p := dlg.Peer.(type) {
+	case *tg.PeerChannel:
+		c, ok := elem.Entities.Channel(p.ChannelID)
+		if !ok {
+			return UnreadChannel{}, false
+		}
+		username, _ := c.GetUsername()
+		typ := "channel"
+		if c.Megagroup {
+			typ = "supergroup"
+		}
+		return UnreadChannel{
+			ID:             c.ID,
+			Title:          c.Title,
+			Username:       username,
+			UnreadCount:    dlg.UnreadCount,
+			UnreadMark:     dlg.UnreadMark,
+			Broadcast:      c.Broadcast,
+			Megagroup:      c.Megagroup,
+			Type:           typ,
+			readInboxMaxID: dlg.ReadInboxMaxID,
+			peer:           elem.Peer,
+		}, true
+	case *tg.PeerChat:
+		ch, ok := elem.Entities.Chat(p.ChatID)
+		if !ok {
+			return UnreadChannel{}, false
+		}
+		return UnreadChannel{
+			ID:             ch.ID,
+			Title:          ch.Title,
+			UnreadCount:    dlg.UnreadCount,
+			UnreadMark:     dlg.UnreadMark,
+			Type:           "group",
+			readInboxMaxID: dlg.ReadInboxMaxID,
+			peer:           elem.Peer,
+		}, true
+	case *tg.PeerUser:
+		u, ok := elem.Entities.User(p.UserID)
+		if !ok {
+			return UnreadChannel{}, false
+		}
+		name := strings.TrimSpace(u.FirstName + " " + u.LastName)
+		if name == "" {
+			name, _ = u.GetUsername()
+		}
+		username, _ := u.GetUsername()
+		accessHash, _ := u.GetAccessHash()
+		return UnreadChannel{
+			ID:             u.ID,
+			Title:          name,
+			Username:       username,
+			UnreadCount:    dlg.UnreadCount,
+			UnreadMark:     dlg.UnreadMark,
+			Type:           "private",
+			readInboxMaxID: dlg.ReadInboxMaxID,
+			peer:           &tg.InputPeerUser{UserID: u.ID, AccessHash: accessHash},
+		}, true
+	default:
 		return UnreadChannel{}, false
 	}
-
-	username, _ := c.GetUsername()
-	return UnreadChannel{
-		ID:             c.ID,
-		Title:          c.Title,
-		Username:       username,
-		UnreadCount:    dlg.UnreadCount,
-		UnreadMark:     dlg.UnreadMark,
-		Broadcast:      c.Broadcast,
-		Megagroup:      c.Megagroup,
-		readInboxMaxID: dlg.ReadInboxMaxID,
-		peer:           elem.Peer,
-	}, true
 }
 
 // channelFromEntity builds an UnreadChannel from a channel object received in
@@ -243,12 +286,17 @@ func channelFromDialog(elem dialogElem) (UnreadChannel, bool) {
 func channelFromEntity(c *tg.Channel) UnreadChannel {
 	username, _ := c.GetUsername()
 	accessHash, _ := c.GetAccessHash()
+	typ := "channel"
+	if c.Megagroup {
+		typ = "supergroup"
+	}
 	return UnreadChannel{
 		ID:        c.ID,
 		Title:     c.Title,
 		Username:  username,
 		Broadcast: c.Broadcast,
 		Megagroup: c.Megagroup,
+		Type:      typ,
 		peer: &tg.InputPeerChannel{
 			ChannelID:  c.ID,
 			AccessHash: accessHash,
@@ -257,12 +305,19 @@ func channelFromEntity(c *tg.Channel) UnreadChannel {
 }
 
 func messageFromTG(msg *tg.Message, ent entities) Message {
-	return Message{
+	m := Message{
 		ID:     msg.ID,
 		Date:   time.Unix(int64(msg.Date), 0).UTC().Format(time.RFC3339),
 		Text:   msg.Message,
 		Author: authorName(msg, ent),
+		Out:    msg.Out,
 	}
+	if rt, ok := msg.GetReplyTo(); ok {
+		if rtm, ok := rt.(*tg.MessageReplyHeader); ok {
+			m.ReplyToID = rtm.ReplyToMsgID
+		}
+	}
+	return m
 }
 
 // authorName resolves a human-readable sender name from a message, when the
@@ -475,4 +530,53 @@ func parseID(s string) (int64, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+// resolvePeer resolves a chat target string to an InputPeerClass.
+//
+// Supported forms:
+//   - "me" or "self" -> &tg.InputPeerSelf{}
+//   - numeric ID or cached @username -> cached peer if present
+//   - @username / t.me link / phone / domain -> use peer resolver (gotd)
+func (s *server) resolvePeer(ctx context.Context, target string) (tg.InputPeerClass, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return nil, errors.New("target is required")
+	}
+	lower := strings.ToLower(target)
+	if lower == "me" || lower == "self" {
+		return &tg.InputPeerSelf{}, nil
+	}
+
+	// Try cached dialog first by numeric ID or @username.
+	if ch, ok := s.cache.find(target); ok && ch.peer != nil {
+		return ch.peer, nil
+	}
+
+	// Fallback to gotd peer resolver (supports @user, t.me, phone, domain).
+	r := peer.DefaultResolver(s.api)
+	p, err := peer.Resolve(r, target)(ctx)
+	if err != nil {
+		return nil, errors.Wrapf(err, "resolve %q", target)
+	}
+	return p, nil
+}
+
+// rebuildPeerFromDialog returns a proper input peer for a cached dialog,
+// preserving access hashes when present.
+func rebuildPeer(ch UnreadChannel) tg.InputPeerClass {
+	if ch.peer != nil {
+		return ch.peer
+	}
+	// Fallback construction when peer is missing (legacy data).
+	if ch.Broadcast || ch.Megagroup {
+		return &tg.InputPeerChannel{ChannelID: ch.ID}
+	}
+	if ch.Type == "private" {
+		return &tg.InputPeerUser{UserID: ch.ID}
+	}
+	if ch.Type == "group" {
+		return &tg.InputPeerChat{ChatID: ch.ID}
+	}
+	return &tg.InputPeerChannel{ChannelID: ch.ID}
 }

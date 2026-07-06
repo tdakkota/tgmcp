@@ -14,10 +14,15 @@ and unread state as the logged-in user.
 
 | Tool | Description |
 | --- | --- |
-| `list_unread_channels` | List channels and supergroups that currently have unread messages, with unread counts. |
+| `list_unread_channels` | List broadcast channels that currently have unread messages, with unread counts. |
 | `read_channel_unread` | Read the unread messages of a channel (by `@username` or numeric ID), newest first. Reading does **not** mark them as read. |
-| `mark_channel_read` | Mark all messages in a specific channel or supergroup as read. |
-| `mark_all_channels_read` | Mark every unread channel and supergroup as read in one call. |
+| `mark_channel_read` | Mark all messages in a specific broadcast channel as read. |
+| `mark_all_channels_read` | Mark every unread broadcast channel as read in one call. |
+| `list_chats` | List cached dialogs (private, groups, supergroups, channels) with id/title/username/type/unread. |
+| `get_chat_messages` | Fetch recent history from any chat (by id, @user, me, t.me link). |
+| `search_chat_messages` | Search messages in a chat (optional filter: photo/video/document/url/...). |
+| `send_message` | Send text; optional reply_to_message_id, silent, no_webpage. |
+| `send_file` | Send file from TG_FILE_ROOT; optional caption, as_photo, reply, silent. |
 
 ## How it works
 
@@ -67,6 +72,7 @@ tool call. Instead, mirroring [tdlib](https://github.com/tdlib/td)'s strategy:
 | `TG_SESSION_DIR` | no | `session` | Directory for the session and state database. |
 | `MCP_ADDR` | no | `127.0.0.1:8080` | Address for the MCP HTTP server. |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, or `error`. |
+| `TG_FILE_ROOT` | no | — | Base dir for send_file. Empty disables send_file with clear error. Paths are resolved inside this root; traversal rejected. |
 
 ## Running
 
@@ -101,6 +107,9 @@ Point your MCP client at the HTTP endpoint (adjust the address to `MCP_ADDR`):
   invocation.
 - Unread detection compares each message ID against the dialog's
   `read_inbox_max_id`; messages newer than that boundary are returned.
+- `list_chats`, `get_chat_messages`, and `search_chat_messages` include
+  `limited: true` when the returned results were capped. Message tools also
+  return `next_offset_id` for continuing with another call.
 - After a long disconnect, a too-long difference is resynced automatically: a
   single channel via `messages.getPeerDialogs`, or the whole list via a full
   re-bootstrap. Deleting `<session>/updates.bolt` forces a clean re-bootstrap on

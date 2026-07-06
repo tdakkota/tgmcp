@@ -17,6 +17,7 @@ type Config struct {
 	SessionDir string
 	HTTPAddr   string
 	LogLevel   string
+	FileRoot   string
 }
 
 // LoadConfig reads configuration from the environment, optionally sourcing a
@@ -32,6 +33,7 @@ type Config struct {
 //	TG_SESSION_DIR   - directory to store the session (default: "./session")
 //	MCP_ADDR         - address for the MCP HTTP server to listen on (default: "127.0.0.1:8080")
 //	LOG_LEVEL        - log level: debug, info, warn, error (default: "info")
+//	TG_FILE_ROOT     - directory from which send_file may read files (default: disabled)
 func LoadConfig() (Config, error) {
 	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
 		return Config{}, errors.Wrap(err, "load .env")
@@ -67,6 +69,8 @@ func LoadConfig() (Config, error) {
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "info"
 	}
+
+	cfg.FileRoot = os.Getenv("TG_FILE_ROOT")
 
 	return cfg, nil
 }

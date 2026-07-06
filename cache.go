@@ -5,6 +5,8 @@ import (
 	"sync"
 
 	"go.uber.org/zap"
+
+	"github.com/gotd/td/tg"
 )
 
 // dialogCache is an in-memory snapshot of the user's channel and supergroup
@@ -20,7 +22,7 @@ import (
 // the updates manager then reconciles it via getDifference.
 type dialogCache struct {
 	mu       sync.RWMutex
-	channels map[int64]UnreadChannel
+	channels map[string]UnreadChannel
 
 	store *dialogStore // optional; nil disables persistence.
 	lg    *zap.Logger
@@ -28,10 +30,14 @@ type dialogCache struct {
 
 func newDialogCache(store *dialogStore, lg *zap.Logger) *dialogCache {
 	return &dialogCache{
-		channels: make(map[int64]UnreadChannel),
+		channels: make(map[string]UnreadChannel),
 		store:    store,
 		lg:       lg,
 	}
+}
+
+func dialogCacheKey(ch UnreadChannel) string {
+	return dialogKey(ch)
 }
 
 // loadFromStore replaces the in-memory cache with the persisted dialogs and
@@ -47,14 +53,9 @@ func (c *dialogCache) loadFromStore() (int, error) {
 		return 0, err
 	}
 
-	m := make(map[int64]UnreadChannel, len(chs))
+	m := make(map[string]UnreadChannel, len(chs))
 	for _, ch := range chs {
-		// Drop group chats (supergroups) persisted before tgmcp narrowed to
-		// broadcast channels only.
-		if !ch.Broadcast {
-			continue
-		}
-		m[ch.ID] = ch
+		m[dialogCacheKey(ch)] = ch
 	}
 
 	c.mu.Lock()
@@ -67,9 +68,9 @@ func (c *dialogCache) loadFromStore() (int, error) {
 // replaceAll swaps the entire cache content and persists it. Used by the
 // one-time full fetch.
 func (c *dialogCache) replaceAll(chs []UnreadChannel) {
-	m := make(map[int64]UnreadChannel, len(chs))
+	m := make(map[string]UnreadChannel, len(chs))
 	for _, ch := range chs {
-		m[ch.ID] = ch
+		m[dialogCacheKey(ch)] = ch
 	}
 
 	c.mu.Lock()
@@ -83,17 +84,34 @@ func (c *dialogCache) replaceAll(chs []UnreadChannel) {
 	}
 }
 
-// unread returns the cached channels that currently have unread messages or are
-// manually marked as unread.
+// unread returns the cached broadcast channels that currently have unread
+// messages or are manually marked as unread. Non-broadcast dialogs are
+// excluded to preserve legacy behavior for list/mark tools.
 func (c *dialogCache) unread() []UnreadChannel {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	var out []UnreadChannel
 	for _, ch := range c.channels {
+		if !ch.Broadcast {
+			continue
+		}
 		if ch.UnreadCount > 0 || ch.UnreadMark {
 			out = append(out, ch)
 		}
+	}
+
+	return out
+}
+
+// all returns every cached dialog regardless of type or unread state.
+func (c *dialogCache) all() []UnreadChannel {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var out []UnreadChannel
+	for _, ch := range c.channels {
+		out = append(out, ch)
 	}
 
 	return out
@@ -103,15 +121,15 @@ func (c *dialogCache) unread() []UnreadChannel {
 func (c *dialogCache) find(target string) (UnreadChannel, bool) {
 	target = strings.TrimPrefix(strings.TrimSpace(target), "@")
 	wantID, isID := parseID(target)
+	if isID {
+		return c.get(wantID)
+	}
 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	for _, ch := range c.channels {
-		if isID && ch.ID == wantID {
-			return ch, true
-		}
-		if !isID && strings.EqualFold(ch.Username, target) {
+		if strings.EqualFold(ch.Username, target) {
 			return ch, true
 		}
 	}
@@ -124,8 +142,34 @@ func (c *dialogCache) get(id int64) (UnreadChannel, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	ch, ok := c.channels[id]
+	for _, kind := range []string{"channel", "chat", "user"} {
+		ch, ok := c.channels[dialogKeyParts(kind, id)]
+		if ok {
+			return ch, true
+		}
+	}
 
+	return UnreadChannel{}, false
+}
+
+// getPeer returns a cached dialog matching the exact input peer namespace.
+func (c *dialogCache) getPeer(p any) (UnreadChannel, bool) {
+	var key string
+	switch v := p.(type) {
+	case *tg.InputPeerChannel:
+		key = dialogKeyParts("channel", v.ChannelID)
+	case *tg.InputPeerChat:
+		key = dialogKeyParts("chat", v.ChatID)
+	case *tg.InputPeerUser:
+		key = dialogKeyParts("user", v.UserID)
+	default:
+		return UnreadChannel{}, false
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	ch, ok := c.channels[key]
 	return ch, ok
 }
 
@@ -133,7 +177,7 @@ func (c *dialogCache) get(id int64) (UnreadChannel, bool) {
 // channel after a too-long difference.
 func (c *dialogCache) set(ch UnreadChannel) {
 	c.mu.Lock()
-	c.channels[ch.ID] = ch
+	c.channels[dialogCacheKey(ch)] = ch
 	c.mu.Unlock()
 
 	c.persist(ch)
@@ -144,11 +188,22 @@ func (c *dialogCache) set(ch UnreadChannel) {
 // private).
 func (c *dialogCache) remove(channelID int64) {
 	c.mu.Lock()
-	_, ok := c.channels[channelID]
-	delete(c.channels, channelID)
+	var key string
+	for _, kind := range []string{"channel", "chat", "user"} {
+		k := dialogKeyParts(kind, channelID)
+		if _, ok := c.channels[k]; ok {
+			key = k
+			break
+		}
+	}
+	if key == "" {
+		c.mu.Unlock()
+		return
+	}
+	delete(c.channels, key)
 	c.mu.Unlock()
 
-	if !ok || c.store == nil {
+	if c.store == nil {
 		return
 	}
 
@@ -164,14 +219,15 @@ func (c *dialogCache) remove(channelID int64) {
 // be resolved, in which case the message is dropped.
 func (c *dialogCache) observeIncoming(channelID int64, build func() (UnreadChannel, bool)) {
 	c.mu.Lock()
-	ch, ok := c.channels[channelID]
+	key := dialogKeyParts("channel", channelID)
+	ch, ok := c.channels[key]
 	if ok {
 		ch.UnreadCount++
-		c.channels[channelID] = ch
+		c.channels[key] = ch
 	} else if nch, built := build(); built {
 		nch.UnreadCount = 1
 		ch, ok = nch, true
-		c.channels[channelID] = nch
+		c.channels[dialogCacheKey(nch)] = nch
 	}
 	c.mu.Unlock()
 
@@ -212,10 +268,11 @@ func (c *dialogCache) markRead(channelID int64) {
 // Unknown channels are ignored.
 func (c *dialogCache) update(channelID int64, mutate func(*UnreadChannel)) {
 	c.mu.Lock()
-	ch, ok := c.channels[channelID]
+	key := dialogKeyParts("channel", channelID)
+	ch, ok := c.channels[key]
 	if ok {
 		mutate(&ch)
-		c.channels[channelID] = ch
+		c.channels[key] = ch
 	}
 	c.mu.Unlock()
 
