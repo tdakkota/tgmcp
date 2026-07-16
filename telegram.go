@@ -57,6 +57,9 @@ type Message struct {
 	Author    string `json:"author,omitempty" jsonschema:"sender name, for groups"`
 	Out       bool   `json:"out,omitempty" jsonschema:"true if outgoing"`
 	ReplyToID int    `json:"reply_to_id,omitempty" jsonschema:"ID of message being replied to"`
+	HasMedia  bool   `json:"has_media,omitempty" jsonschema:"true if the message has downloadable media (see get_file)"`
+	MediaType string `json:"media_type,omitempty" jsonschema:"media kind: photo or document"`
+	FileName  string `json:"file_name,omitempty" jsonschema:"file name of the attached document, if any"`
 }
 
 // bootstrapDialogs loads the full dialog list once and seeds the cache. It
@@ -315,6 +318,21 @@ func messageFromTG(msg *tg.Message, ent entities) Message {
 	if rt, ok := msg.GetReplyTo(); ok {
 		if rtm, ok := rt.(*tg.MessageReplyHeader); ok {
 			m.ReplyToID = rtm.ReplyToMsgID
+		}
+	}
+	if media, ok := msg.GetMedia(); ok {
+		switch mm := media.(type) {
+		case *tg.MessageMediaPhoto:
+			if _, ok := mm.Photo.(*tg.Photo); ok {
+				m.HasMedia = true
+				m.MediaType = "photo"
+			}
+		case *tg.MessageMediaDocument:
+			if doc, ok := mm.Document.(*tg.Document); ok {
+				m.HasMedia = true
+				m.MediaType = "document"
+				m.FileName = documentFileName(doc)
+			}
 		}
 	}
 	return m

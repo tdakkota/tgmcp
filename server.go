@@ -19,11 +19,13 @@ import (
 
 // server holds the dependencies shared by the MCP tool handlers.
 type server struct {
-	api         *tg.Client
-	cache       *dialogCache
-	msgs        *messageStore
-	lg          *zap.Logger
-	fileRootVal string
+	api              *tg.Client
+	cache            *dialogCache
+	msgs             *messageStore
+	lg               *zap.Logger
+	fileRootVal      string
+	allowSend        bool
+	allowProfileEdit bool
 }
 
 // logged wraps a typed tool handler so that every tool call is logged at debug
@@ -148,6 +150,57 @@ type sendFileOutput struct {
 	MessageID int  `json:"message_id,omitempty" jsonschema:"sent message id if known"`
 }
 
+type sendReactionInput struct {
+	Chat      string `json:"chat" jsonschema:"chat target"`
+	MessageID int    `json:"message_id" jsonschema:"id of the message to react to"`
+	Emoji     string `json:"emoji,omitempty" jsonschema:"reaction emoji, e.g. \U0001F44D; empty removes the reaction"`
+	Big       bool   `json:"big,omitempty" jsonschema:"show a big animated reaction"`
+}
+
+type sendReactionOutput struct {
+	OK bool `json:"ok" jsonschema:"true on success"`
+}
+
+type sendChatActionInput struct {
+	Chat   string `json:"chat" jsonschema:"chat target"`
+	Action string `json:"action" jsonschema:"one of: typing, cancel, upload_photo, upload_document, record_audio, upload_audio, record_video, upload_video, choose_sticker, geo, record_round, upload_round"`
+}
+
+type sendChatActionOutput struct {
+	OK bool `json:"ok" jsonschema:"true on success"`
+}
+
+type getFileInput struct {
+	Chat      string `json:"chat" jsonschema:"chat target"`
+	MessageID int    `json:"message_id" jsonschema:"id of the message whose media to download"`
+	Path      string `json:"path,omitempty" jsonschema:"destination path relative to TG_FILE_ROOT; defaults to a name derived from the media"`
+}
+
+type getFileOutput struct {
+	OK       bool   `json:"ok" jsonschema:"true on success"`
+	Path     string `json:"path" jsonschema:"path written, relative to TG_FILE_ROOT"`
+	MimeType string `json:"mime_type,omitempty" jsonschema:"MIME type of the downloaded file, if known"`
+	Size     int64  `json:"size,omitempty" jsonschema:"size in bytes, if known"`
+}
+
+type updateProfileInput struct {
+	FirstName *string `json:"first_name,omitempty" jsonschema:"new first name; omit to leave unchanged"`
+	LastName  *string `json:"last_name,omitempty" jsonschema:"new last name; omit to leave unchanged"`
+	About     *string `json:"about,omitempty" jsonschema:"new bio/about text; omit to leave unchanged"`
+}
+
+type updateProfileOutput struct {
+	OK bool `json:"ok" jsonschema:"true on success"`
+}
+
+type updateProfilePhotoInput struct {
+	Path string `json:"path" jsonschema:"path relative to TG_FILE_ROOT or absolute inside it"`
+}
+
+type updateProfilePhotoOutput struct {
+	OK bool `json:"ok" jsonschema:"true on success"`
+}
+
 // register wires the tools onto an MCP server.
 func (s *server) register(m *mcp.Server) {
 	mcp.AddTool(m, &mcp.Tool{
@@ -186,14 +239,43 @@ func (s *server) register(m *mcp.Server) {
 	}, logged(s.lg, "search_chat_messages", s.handleSearchChatMessages))
 
 	mcp.AddTool(m, &mcp.Tool{
-		Name:        "send_message",
-		Description: "Send text message to a chat. Supports reply_to_message_id, silent, no_webpage.",
-	}, logged(s.lg, "send_message", s.handleSendMessage))
+		Name:        "get_file",
+		Description: "Download the media attached to a message into TG_FILE_ROOT.",
+	}, logged(s.lg, "get_file", s.handleGetFile))
 
-	mcp.AddTool(m, &mcp.Tool{
-		Name:        "send_file",
-		Description: "Send file from configured TG_FILE_ROOT. Supports caption, as_photo, reply_to_message_id, silent.",
-	}, logged(s.lg, "send_file", s.handleSendFile))
+	if s.allowSend {
+		mcp.AddTool(m, &mcp.Tool{
+			Name:        "send_message",
+			Description: "Send text message to a chat. Supports reply_to_message_id, silent, no_webpage.",
+		}, logged(s.lg, "send_message", s.handleSendMessage))
+
+		mcp.AddTool(m, &mcp.Tool{
+			Name:        "send_file",
+			Description: "Send file from configured TG_FILE_ROOT. Supports caption, as_photo, reply_to_message_id, silent.",
+		}, logged(s.lg, "send_file", s.handleSendFile))
+
+		mcp.AddTool(m, &mcp.Tool{
+			Name:        "send_reaction",
+			Description: "React to a message with an emoji. Empty emoji removes the reaction.",
+		}, logged(s.lg, "send_reaction", s.handleSendReaction))
+
+		mcp.AddTool(m, &mcp.Tool{
+			Name:        "send_chat_action",
+			Description: "Send a transient chat action (typing, uploading, recording, etc).",
+		}, logged(s.lg, "send_chat_action", s.handleSendChatAction))
+	}
+
+	if s.allowProfileEdit {
+		mcp.AddTool(m, &mcp.Tool{
+			Name:        "update_profile",
+			Description: "Update the account's first name, last name and/or bio (about text).",
+		}, logged(s.lg, "update_profile", s.handleUpdateProfile))
+
+		mcp.AddTool(m, &mcp.Tool{
+			Name:        "update_profile_photo",
+			Description: "Set the account's profile photo from a file under TG_FILE_ROOT.",
+		}, logged(s.lg, "update_profile_photo", s.handleUpdateProfilePhoto))
+	}
 }
 
 func (s *server) handleListChannels(_ context.Context, _ *mcp.CallToolRequest, _ listChannelsInput) (*mcp.CallToolResult, listChannelsOutput, error) {
@@ -443,6 +525,79 @@ func (s *server) handleSendFile(ctx context.Context, _ *mcp.CallToolRequest, in 
 	}
 	id := extractSentMessageID(upd)
 	return nil, sendFileOutput{OK: true, MessageID: id}, nil
+}
+
+func (s *server) handleSendReaction(ctx context.Context, _ *mcp.CallToolRequest, in sendReactionInput) (*mcp.CallToolResult, sendReactionOutput, error) {
+	if in.Chat == "" || in.MessageID <= 0 {
+		return nil, sendReactionOutput{}, errors.New("chat and message_id are required")
+	}
+	p, err := s.resolvePeer(ctx, in.Chat)
+	if err != nil {
+		return nil, sendReactionOutput{}, err
+	}
+	var reaction []tg.ReactionClass
+	if in.Emoji != "" {
+		reaction = append(reaction, &tg.ReactionEmoji{Emoticon: in.Emoji})
+	}
+	_, err = s.api.MessagesSendReaction(ctx, &tg.MessagesSendReactionRequest{
+		Big:         in.Big,
+		AddToRecent: true,
+		Peer:        p,
+		MsgID:       in.MessageID,
+		Reaction:    reaction,
+	})
+	if err != nil {
+		return nil, sendReactionOutput{}, errors.Wrap(err, "send reaction")
+	}
+	return nil, sendReactionOutput{OK: true}, nil
+}
+
+func (s *server) handleSendChatAction(ctx context.Context, _ *mcp.CallToolRequest, in sendChatActionInput) (*mcp.CallToolResult, sendChatActionOutput, error) {
+	if in.Chat == "" || in.Action == "" {
+		return nil, sendChatActionOutput{}, errors.New("chat and action are required")
+	}
+	p, err := s.resolvePeer(ctx, in.Chat)
+	if err != nil {
+		return nil, sendChatActionOutput{}, err
+	}
+	b := message.NewSender(s.api).To(p).TypingAction()
+	if err := sendChatAction(ctx, b, in.Action); err != nil {
+		return nil, sendChatActionOutput{}, err
+	}
+	return nil, sendChatActionOutput{OK: true}, nil
+}
+
+// sendChatAction dispatches a chat action name to the matching
+// TypingActionBuilder method.
+func sendChatAction(ctx context.Context, b *message.TypingActionBuilder, action string) error {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "typing":
+		return b.Typing(ctx)
+	case "cancel":
+		return b.Cancel(ctx)
+	case "upload_photo":
+		return b.UploadPhoto(ctx, 0)
+	case "upload_document":
+		return b.UploadDocument(ctx, 0)
+	case "record_audio":
+		return b.RecordAudio(ctx)
+	case "upload_audio":
+		return b.UploadAudio(ctx, 0)
+	case "record_video":
+		return b.RecordVideo(ctx)
+	case "upload_video":
+		return b.UploadVideo(ctx, 0)
+	case "choose_sticker":
+		return b.ChooseSticker(ctx)
+	case "geo":
+		return b.GeoLocation(ctx)
+	case "record_round":
+		return b.RecordRound(ctx)
+	case "upload_round":
+		return b.UploadRound(ctx, 0)
+	default:
+		return errors.Errorf("unsupported chat action %q", action)
+	}
 }
 
 // peerToChannel returns a lightweight UnreadChannel for output when we only

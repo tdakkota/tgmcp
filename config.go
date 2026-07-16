@@ -11,13 +11,15 @@ import (
 
 // Config holds the credentials and paths required to run the server.
 type Config struct {
-	AppID      int
-	AppHash    string
-	Phone      string
-	SessionDir string
-	HTTPAddr   string
-	LogLevel   string
-	FileRoot   string
+	AppID            int
+	AppHash          string
+	Phone            string
+	SessionDir       string
+	HTTPAddr         string
+	LogLevel         string
+	FileRoot         string
+	AllowSend        bool
+	AllowProfileEdit bool
 }
 
 // LoadConfig reads configuration from the environment, optionally sourcing a
@@ -34,6 +36,8 @@ type Config struct {
 //	MCP_ADDR         - address for the MCP HTTP server to listen on (default: "127.0.0.1:8080")
 //	LOG_LEVEL        - log level: debug, info, warn, error (default: "info")
 //	TG_FILE_ROOT     - directory from which send_file may read files (default: disabled)
+//	TG_ALLOW_SEND    - enable send_message, send_file, send_reaction, send_chat_action (default: true)
+//	TG_ALLOW_PROFILE_EDIT - enable update_profile, update_profile_photo (default: false)
 func LoadConfig() (Config, error) {
 	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
 		return Config{}, errors.Wrap(err, "load .env")
@@ -71,6 +75,9 @@ func LoadConfig() (Config, error) {
 	}
 
 	cfg.FileRoot = os.Getenv("TG_FILE_ROOT")
+
+	cfg.AllowSend = os.Getenv("TG_ALLOW_SEND") != "false"
+	cfg.AllowProfileEdit = os.Getenv("TG_ALLOW_PROFILE_EDIT") == "true"
 
 	return cfg, nil
 }

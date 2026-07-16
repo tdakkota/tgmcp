@@ -174,7 +174,15 @@ func runServe(ctx context.Context, cfg Config) error {
 			// updates manager starts, so it is visible by the time updates flow.
 			api = client.API()
 
-			srv := &server{api: client.API(), cache: cache, msgs: msgs, lg: lg, fileRootVal: cfg.FileRoot}
+			srv := &server{
+				api:              client.API(),
+				cache:            cache,
+				msgs:             msgs,
+				lg:               lg,
+				fileRootVal:      cfg.FileRoot,
+				allowSend:        cfg.AllowSend,
+				allowProfileEdit: cfg.AllowProfileEdit,
+			}
 			m := mcp.NewServer(&mcp.Implementation{
 				Name:    "tgmcp",
 				Version: "0.1.0",

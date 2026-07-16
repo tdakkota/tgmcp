@@ -16,7 +16,7 @@ import (
 func TestToolsRegister(t *testing.T) {
 	ctx := context.Background()
 
-	srv := &server{api: nil}
+	srv := &server{api: nil, allowSend: true, allowProfileEdit: true}
 	m := mcp.NewServer(&mcp.Implementation{Name: "tgmcp", Version: "test"}, nil)
 	srv.register(m)
 
@@ -47,6 +47,11 @@ func TestToolsRegister(t *testing.T) {
 		"search_chat_messages":   false,
 		"send_message":           false,
 		"send_file":              false,
+		"send_reaction":          false,
+		"send_chat_action":       false,
+		"get_file":               false,
+		"update_profile":         false,
+		"update_profile_photo":   false,
 	}
 	for _, tool := range res.Tools {
 		if _, ok := want[tool.Name]; ok {
@@ -59,6 +64,42 @@ func TestToolsRegister(t *testing.T) {
 	for name, found := range want {
 		if !found {
 			t.Errorf("tool %q was not advertised", name)
+		}
+	}
+}
+
+// TestToolsRegisterGated verifies that disabling allowSend/allowProfileEdit
+// hides the corresponding tools instead of just erroring inside the handler.
+func TestToolsRegisterGated(t *testing.T) {
+	ctx := context.Background()
+
+	srv := &server{api: nil}
+	m := mcp.NewServer(&mcp.Implementation{Name: "tgmcp", Version: "test"}, nil)
+	srv.register(m)
+
+	serverTr, clientTr := mcp.NewInMemoryTransports()
+	if _, err := m.Connect(ctx, serverTr, nil); err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "test"}, nil)
+	cs, err := client.Connect(ctx, clientTr, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer cs.Close()
+
+	res, err := cs.ListTools(ctx, &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+
+	gated := []string{"send_message", "send_file", "send_reaction", "send_chat_action", "update_profile", "update_profile_photo"}
+	for _, tool := range res.Tools {
+		for _, name := range gated {
+			if tool.Name == name {
+				t.Errorf("tool %q was advertised despite being gated off", name)
+			}
 		}
 	}
 }
