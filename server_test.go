@@ -45,6 +45,7 @@ func TestToolsRegister(t *testing.T) {
 		"mark_chat_read":         false,
 		"mark_all_channels_read": false,
 		"list_chats":             false,
+		"search_chats":           false,
 		"get_me":                 false,
 		"resolve_peer":           false,
 		"get_chat_messages":      false,

@@ -80,6 +80,17 @@ type getMeOutput struct {
 	User PeerInfo `json:"user" jsonschema:"the signed-in account"`
 }
 
+type searchChatsInput struct {
+	Query string `json:"query" jsonschema:"name, @username or phone to search for"`
+	Limit int    `json:"limit,omitempty" jsonschema:"maximum results (default 20, max 100)"`
+}
+
+type searchChatsOutput struct {
+	MyResults     []PeerInfo `json:"my_results" jsonschema:"matches among own dialogs and contacts"`
+	GlobalResults []PeerInfo `json:"global_results" jsonschema:"public matches from the global directory"`
+	Limit         int        `json:"limit" jsonschema:"applied result limit"`
+}
+
 type resolvePeerInput struct {
 	Target string `json:"target" jsonschema:"peer target (id, @username, me, t.me link, phone)"`
 }
@@ -248,6 +259,11 @@ func (s *server) register(m *mcp.Server) {
 		Name:        "get_me",
 		Description: "Get the signed-in Telegram account: id, name, username, phone and bio.",
 	}, logged(s.lg, "get_me", s.handleGetMe))
+
+	mcp.AddTool(m, &mcp.Tool{
+		Name:        "search_chats",
+		Description: "Search Telegram for users, bots, groups and channels by name or @username, including public ones not in the dialog list.",
+	}, logged(s.lg, "search_chats", s.handleSearchChats))
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "resolve_peer",

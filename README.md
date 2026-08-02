@@ -19,6 +19,7 @@ and unread state as the logged-in user.
 | `mark_chat_read` | Mark all messages in a dialog as read: private chats, groups, supergroups and channels. |
 | `mark_all_channels_read` | Mark every unread broadcast channel as read in one call. Does not touch private chats or groups. |
 | `list_chats` | List cached dialogs (private, groups, supergroups, channels) with id/title/username/type/unread. Optional `query` matches title or username. |
+| `search_chats` | Search Telegram (`contacts.search`) for users, bots, groups and channels, including public ones not in the dialog list. |
 | `get_me` | Get the signed-in account: id, name, username, phone and bio. |
 | `resolve_peer` | Resolve a user, bot, group or channel by id, `@username`, t.me link or phone, and return its details. |
 | `get_chat_messages` | Fetch recent history from any chat (by id, @user, me, t.me link). |

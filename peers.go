@@ -104,7 +104,16 @@ func (s *server) userInfo(ctx context.Context, id tg.InputUserClass) (PeerInfo, 
 		return PeerInfo{}, errors.Errorf("user %d not found in response", full.FullUser.ID)
 	}
 
-	about, _ := full.FullUser.GetAbout()
+	info := infoFromUser(u)
+	info.About, _ = full.FullUser.GetAbout()
+	info.Blocked = full.FullUser.Blocked
+
+	return info, nil
+}
+
+// infoFromUser builds peer info from a user entity, without the extra fields
+// that only users.getFullUser provides.
+func infoFromUser(u *tg.User) PeerInfo {
 	info := PeerInfo{
 		Type:          "private",
 		ID:            u.ID,
@@ -114,7 +123,6 @@ func (s *server) userInfo(ctx context.Context, id tg.InputUserClass) (PeerInfo, 
 		FirstName:     u.FirstName,
 		LastName:      u.LastName,
 		Phone:         u.Phone,
-		About:         about,
 		Bot:           u.Bot,
 		Premium:       u.Premium,
 		Verified:      u.Verified,
@@ -123,13 +131,36 @@ func (s *server) userInfo(ctx context.Context, id tg.InputUserClass) (PeerInfo, 
 		Deleted:       u.Deleted,
 		Contact:       u.Contact,
 		MutualContact: u.MutualContact,
-		Blocked:       full.FullUser.Blocked,
 	}
 	if u.Bot {
 		info.Type = "bot"
 	}
 
-	return info, nil
+	return info
+}
+
+// infoFromChannel builds peer info from a channel entity, without the extra
+// fields that only channels.getFullChannel provides.
+func infoFromChannel(c *tg.Channel) PeerInfo {
+	username, _ := c.GetUsername()
+	accessHash, _ := c.GetAccessHash()
+	info := PeerInfo{
+		Type:       "channel",
+		ID:         c.ID,
+		AccessHash: accessHash,
+		Title:      c.Title,
+		Username:   username,
+		Broadcast:  c.Broadcast,
+		Megagroup:  c.Megagroup,
+		Verified:   c.Verified,
+		Scam:       c.Scam,
+		Fake:       c.Fake,
+	}
+	if c.Megagroup {
+		info.Type = "supergroup"
+	}
+
+	return info
 }
 
 func (s *server) chatInfo(ctx context.Context, chatID int64) (PeerInfo, error) {
@@ -161,28 +192,18 @@ func (s *server) channelInfo(ctx context.Context, id *tg.InputChannel) (PeerInfo
 	}
 
 	info := PeerInfo{Type: "channel", ID: id.ChannelID, AccessHash: id.AccessHash}
-	if fc, ok := full.FullChat.(*tg.ChannelFull); ok {
-		info.About = fc.About
-		info.ParticipantsCount = fc.ParticipantsCount
-	}
 	for _, c := range full.Chats {
 		ch, ok := c.(*tg.Channel)
 		if !ok || ch.ID != id.ChannelID {
 			continue
 		}
-		username, _ := ch.GetUsername()
-		info.Title = ch.Title
-		info.Username = username
-		info.Broadcast = ch.Broadcast
-		info.Megagroup = ch.Megagroup
-		info.Verified = ch.Verified
-		info.Scam = ch.Scam
-		info.Fake = ch.Fake
-		if ch.Megagroup {
-			info.Type = "supergroup"
-		}
+		info = infoFromChannel(ch)
 
 		break
+	}
+	if fc, ok := full.FullChat.(*tg.ChannelFull); ok {
+		info.About = fc.About
+		info.ParticipantsCount = fc.ParticipantsCount
 	}
 
 	return info, nil
@@ -231,6 +252,86 @@ func (s *server) handleGetMe(ctx context.Context, _ *mcp.CallToolRequest, _ getM
 	}
 
 	return nil, getMeOutput{User: info}, nil
+}
+
+func (s *server) handleSearchChats(ctx context.Context, _ *mcp.CallToolRequest, in searchChatsInput) (*mcp.CallToolResult, searchChatsOutput, error) {
+	q := strings.TrimPrefix(strings.TrimSpace(in.Query), "@")
+	if q == "" {
+		return nil, searchChatsOutput{}, errors.New("query is required")
+	}
+	lim := in.Limit
+	if lim <= 0 {
+		lim = 20
+	}
+	if lim > 100 {
+		lim = 100
+	}
+
+	found, err := s.api.ContactsSearch(ctx, &tg.ContactsSearchRequest{Q: q, Limit: lim})
+	if err != nil {
+		return nil, searchChatsOutput{}, errors.Wrap(err, "contacts.search")
+	}
+
+	users := make(map[int64]*tg.User, len(found.Users))
+	for _, uc := range found.Users {
+		if u, ok := uc.(*tg.User); ok {
+			users[u.ID] = u
+		}
+	}
+	channels := make(map[int64]*tg.Channel, len(found.Chats))
+	chats := make(map[int64]*tg.Chat, len(found.Chats))
+	for _, cc := range found.Chats {
+		switch c := cc.(type) {
+		case *tg.Channel:
+			channels[c.ID] = c
+		case *tg.Chat:
+			chats[c.ID] = c
+		}
+	}
+
+	resolve := func(peers []tg.PeerClass) []PeerInfo {
+		out := make([]PeerInfo, 0, len(peers))
+		for _, p := range peers {
+			var info PeerInfo
+			switch v := p.(type) {
+			case *tg.PeerUser:
+				u, ok := users[v.UserID]
+				if !ok {
+					continue
+				}
+				info = infoFromUser(u)
+			case *tg.PeerChannel:
+				c, ok := channels[v.ChannelID]
+				if !ok {
+					continue
+				}
+				info = infoFromChannel(c)
+			case *tg.PeerChat:
+				c, ok := chats[v.ChatID]
+				if !ok {
+					continue
+				}
+				info = PeerInfo{
+					Type:              "group",
+					ID:                c.ID,
+					Title:             c.Title,
+					ParticipantsCount: c.ParticipantsCount,
+				}
+			default:
+				continue
+			}
+			s.applyDialog(&info)
+			out = append(out, info)
+		}
+
+		return out
+	}
+
+	return nil, searchChatsOutput{
+		MyResults:     resolve(found.MyResults),
+		GlobalResults: resolve(found.Results),
+		Limit:         lim,
+	}, nil
 }
 
 func (s *server) handleResolvePeer(ctx context.Context, _ *mcp.CallToolRequest, in resolvePeerInput) (*mcp.CallToolResult, resolvePeerOutput, error) {
