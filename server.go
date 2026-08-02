@@ -200,7 +200,7 @@ type sendChatActionOutput struct {
 }
 
 type sendScreenshotNotificationInput struct {
-	Chat      string `json:"chat" jsonschema:"private chat target (id, @username, me, t.me link)"`
+	Chat      string `json:"chat" jsonschema:"chat target (id, @username, me, t.me link)"`
 	MessageID int    `json:"message_id,omitempty" jsonschema:"id of the message that was screenshotted; omit to not point at one"`
 }
 
@@ -319,7 +319,7 @@ func (s *server) register(m *mcp.Server) {
 
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "send_screenshot_notification",
-			Description: "Notify the other party of a private chat that a screenshot was taken. Posts a visible service message.",
+			Description: "Notify a chat that a screenshot was taken. Posts a visible service message.",
 		}, logged(s.lg, "send_screenshot_notification", s.handleSendScreenshotNotification))
 	}
 
@@ -646,11 +646,6 @@ func (s *server) handleSendScreenshotNotification(ctx context.Context, _ *mcp.Ca
 	p, err := s.resolvePeer(ctx, in.Chat)
 	if err != nil {
 		return nil, sendScreenshotNotificationOutput{}, err
-	}
-	switch p.(type) {
-	case *tg.InputPeerUser, *tg.InputPeerSelf:
-	default:
-		return nil, sendScreenshotNotificationOutput{}, errors.Errorf("chat %q is not a private chat: screenshot notifications only work with users", in.Chat)
 	}
 	randomID, err := randomInt64()
 	if err != nil {

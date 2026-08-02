@@ -26,7 +26,7 @@ and unread state as the logged-in user.
 | `search_chat_messages` | Search messages in a chat (optional filter: photo/video/document/url/...). |
 | `send_message` | Send text; optional reply_to_message_id, silent, no_webpage. |
 | `send_file` | Send file from TG_FILE_ROOT; optional caption, as_photo, reply, silent. |
-| `send_screenshot_notification` | Tell the other party of a private chat that a screenshot was taken. Posts a visible service message. |
+| `send_screenshot_notification` | Tell a chat that a screenshot was taken. Posts a visible service message. |
 
 ## How it works
 
