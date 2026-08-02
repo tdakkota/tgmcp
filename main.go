@@ -182,6 +182,7 @@ func runServe(ctx context.Context, cfg Config) error {
 				fileRootVal:      cfg.FileRoot,
 				allowSend:        cfg.AllowSend,
 				allowProfileEdit: cfg.AllowProfileEdit,
+				allowInlineMedia: cfg.AllowInlineMedia,
 			}
 			m := mcp.NewServer(&mcp.Implementation{
 				Name:    "tgmcp",

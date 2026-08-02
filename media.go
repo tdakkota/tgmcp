@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"mime"
 	"strconv"
+	"strings"
 
 	"github.com/go-faster/errors"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -13,13 +15,21 @@ import (
 	"github.com/gotd/td/tg"
 )
 
+// maxInlineMediaBytes bounds how large an image may be to be returned in the
+// tool result. Base64 inflates it by a third on the wire and it lands directly
+// in the model's context, so keep it well below the file size Telegram allows.
+const maxInlineMediaBytes = 5 << 20
+
 func (s *server) handleGetFile(ctx context.Context, _ *mcp.CallToolRequest, in getFileInput) (*mcp.CallToolResult, getFileOutput, error) {
 	if in.Chat == "" || in.MessageID <= 0 {
 		return nil, getFileOutput{}, errors.New("chat and message_id are required")
 	}
 	root := s.fileRootVal
-	if root == "" {
+	if root == "" && !in.Inline {
 		return nil, getFileOutput{}, errors.New("TG_FILE_ROOT not configured")
+	}
+	if in.Inline && !s.allowInlineMedia {
+		return nil, getFileOutput{}, errors.New("inline media is disabled: set TG_ALLOW_INLINE_MEDIA=true")
 	}
 	p, err := s.resolvePeer(ctx, in.Chat)
 	if err != nil {
@@ -29,9 +39,16 @@ func (s *server) handleGetFile(ctx context.Context, _ *mcp.CallToolRequest, in g
 	if err != nil {
 		return nil, getFileOutput{}, err
 	}
-	loc, name, mimeType, size, err := mediaLocation(msg)
+	pick := largestPhotoSize
+	if in.Inline {
+		pick = visionPhotoSize
+	}
+	loc, name, mimeType, size, err := mediaLocationWith(msg, pick)
 	if err != nil {
 		return nil, getFileOutput{}, err
+	}
+	if in.Inline {
+		return s.inlineMedia(ctx, loc, mimeType, size)
 	}
 	relPath := in.Path
 	if relPath == "" {
@@ -45,6 +62,32 @@ func (s *server) handleGetFile(ctx context.Context, _ *mcp.CallToolRequest, in g
 		return nil, getFileOutput{}, errors.Wrap(err, "download")
 	}
 	return nil, getFileOutput{OK: true, Path: relPath, MimeType: mimeType, Size: size}, nil
+}
+
+// inlineMedia downloads an image into memory and returns it as an image content
+// block, which vision-capable clients render as an image instead of text.
+func (s *server) inlineMedia(ctx context.Context, loc tg.InputFileLocationClass, mimeType string, size int64) (*mcp.CallToolResult, getFileOutput, error) {
+	if !strings.HasPrefix(mimeType, "image/") {
+		return nil, getFileOutput{}, errors.Errorf("media type %q cannot be returned inline: images only", mimeType)
+	}
+	if size > maxInlineMediaBytes {
+		return nil, getFileOutput{}, errors.Errorf("image is %d bytes, over the %d byte inline limit: download it to disk instead", size, maxInlineMediaBytes)
+	}
+
+	var buf bytes.Buffer
+	if _, err := downloader.NewDownloader().Download(s.api, loc).Stream(ctx, &buf); err != nil {
+		return nil, getFileOutput{}, errors.Wrap(err, "download")
+	}
+	// The advertised size can be absent or wrong, so bound the actual bytes too.
+	if buf.Len() > maxInlineMediaBytes {
+		return nil, getFileOutput{}, errors.Errorf("image is %d bytes, over the %d byte inline limit: download it to disk instead", buf.Len(), maxInlineMediaBytes)
+	}
+
+	res := &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.ImageContent{Data: buf.Bytes(), MIMEType: mimeType}},
+	}
+
+	return res, getFileOutput{OK: true, MimeType: mimeType, Size: int64(buf.Len()), Inline: true}, nil
 }
 
 // fetchMessage fetches a single message by ID from peer, using the same
@@ -64,8 +107,14 @@ func fetchMessage(ctx context.Context, api *tg.Client, p tg.InputPeerClass, id i
 }
 
 // mediaLocation extracts a downloadable file location, default file name,
-// MIME type and size from a message's media.
+// MIME type and size from a message's media, at the largest photo size.
 func mediaLocation(msg *tg.Message) (tg.InputFileLocationClass, string, string, int64, error) {
+	return mediaLocationWith(msg, largestPhotoSize)
+}
+
+// mediaLocationWith is mediaLocation with a choice of which photo size variant
+// to point at. It has no effect on documents, which have a single version.
+func mediaLocationWith(msg *tg.Message, pick func([]tg.PhotoSizeClass) (tg.PhotoSize, bool)) (tg.InputFileLocationClass, string, string, int64, error) {
 	media, ok := msg.GetMedia()
 	if !ok {
 		return nil, "", "", 0, errors.Errorf("message %d has no media", msg.ID)
@@ -76,7 +125,7 @@ func mediaLocation(msg *tg.Message) (tg.InputFileLocationClass, string, string, 
 		if !ok {
 			return nil, "", "", 0, errors.Errorf("message %d photo is not available", msg.ID)
 		}
-		best, ok := largestPhotoSize(photo.Sizes)
+		best, ok := pick(photo.Sizes)
 		if !ok {
 			return nil, "", "", 0, errors.Errorf("message %d photo has no usable size", msg.ID)
 		}
@@ -105,22 +154,41 @@ func mediaLocation(msg *tg.Message) (tg.InputFileLocationClass, string, string, 
 	}
 }
 
+// inlinePhotoTargetPx is the long edge inline images aim for. Telegram offers
+// roughly 100/320/800/1280/2560px variants: below this a screenshot's text is
+// unreadable to a vision model, while above it clients downscale anyway, so the
+// extra pixels only cost context.
+const inlinePhotoTargetPx = 1280
+
+// photoSize normalizes a photo size variant, skipping the ones that carry no
+// downloadable file (stripped/cached/path previews).
+func photoSize(sz tg.PhotoSizeClass) (tg.PhotoSize, bool) {
+	switch v := sz.(type) {
+	case *tg.PhotoSize:
+		return *v, true
+	case *tg.PhotoSizeProgressive:
+		cur := tg.PhotoSize{Type: v.Type, W: v.W, H: v.H}
+		if n := len(v.Sizes); n > 0 {
+			cur.Size = v.Sizes[n-1]
+		}
+		return cur, true
+	default:
+		return tg.PhotoSize{}, false
+	}
+}
+
+func longEdge(sz tg.PhotoSize) int {
+	return max(sz.W, sz.H)
+}
+
 // largestPhotoSize returns the size with the greatest area among sizes that
 // carry a thumbnail type (skips stripped/cached/path previews).
 func largestPhotoSize(sizes []tg.PhotoSizeClass) (tg.PhotoSize, bool) {
 	var best tg.PhotoSize
 	var found bool
 	for _, sz := range sizes {
-		var cur tg.PhotoSize
-		switch v := sz.(type) {
-		case *tg.PhotoSize:
-			cur = *v
-		case *tg.PhotoSizeProgressive:
-			cur = tg.PhotoSize{Type: v.Type, W: v.W, H: v.H}
-			if n := len(v.Sizes); n > 0 {
-				cur.Size = v.Sizes[n-1]
-			}
-		default:
+		cur, ok := photoSize(sz)
+		if !ok {
 			continue
 		}
 		if !found || cur.W*cur.H > best.W*best.H {
@@ -129,6 +197,30 @@ func largestPhotoSize(sizes []tg.PhotoSizeClass) (tg.PhotoSize, bool) {
 		}
 	}
 	return best, found
+}
+
+// visionPhotoSize returns the smallest variant whose long edge reaches
+// inlinePhotoTargetPx, falling back to the largest available when none does.
+func visionPhotoSize(sizes []tg.PhotoSizeClass) (tg.PhotoSize, bool) {
+	var smallestEnough, largest tg.PhotoSize
+	var haveEnough, haveAny bool
+	for _, sz := range sizes {
+		cur, ok := photoSize(sz)
+		if !ok {
+			continue
+		}
+		if !haveAny || longEdge(cur) > longEdge(largest) {
+			largest, haveAny = cur, true
+		}
+		if longEdge(cur) >= inlinePhotoTargetPx && (!haveEnough || longEdge(cur) < longEdge(smallestEnough)) {
+			smallestEnough, haveEnough = cur, true
+		}
+	}
+	if haveEnough {
+		return smallestEnough, true
+	}
+
+	return largest, haveAny
 }
 
 // documentFileName derives a file name for a document, preferring an

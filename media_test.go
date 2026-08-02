@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/gotd/td/tg"
@@ -178,5 +180,85 @@ func TestMediaLocation(t *testing.T) {
 				t.Fatalf("unexpected location type %T", loc)
 			}
 		})
+	}
+}
+
+// TestGetFileInlineGate verifies that inline media is refused before any
+// Telegram request is made when the right is not granted.
+func TestGetFileInlineGate(t *testing.T) {
+	srv := &server{api: nil, fileRootVal: t.TempDir()}
+	_, _, err := srv.handleGetFile(context.Background(), nil, getFileInput{
+		Chat:      "me",
+		MessageID: 1,
+		Inline:    true,
+	})
+	if err == nil {
+		t.Fatal("inline download allowed without TG_ALLOW_INLINE_MEDIA")
+	}
+	if !strings.Contains(err.Error(), "TG_ALLOW_INLINE_MEDIA") {
+		t.Errorf("unhelpful error: %v", err)
+	}
+}
+
+func TestVisionPhotoSize(t *testing.T) {
+	// The variants Telegram typically offers for a photo.
+	full := []tg.PhotoSizeClass{
+		&tg.PhotoSize{Type: "s", W: 100, H: 75},
+		&tg.PhotoSize{Type: "m", W: 320, H: 240},
+		&tg.PhotoSize{Type: "x", W: 800, H: 600},
+		&tg.PhotoSize{Type: "y", W: 1280, H: 960},
+		&tg.PhotoSize{Type: "w", W: 2560, H: 1920},
+	}
+	tests := []struct {
+		name    string
+		sizes   []tg.PhotoSizeClass
+		wantOK  bool
+		wantTyp string
+	}{
+		{name: "empty", sizes: nil, wantOK: false},
+		{name: "smallest that reaches the target", sizes: full, wantOK: true, wantTyp: "y"},
+		{
+			name: "falls back to largest when all are below target",
+			sizes: []tg.PhotoSizeClass{
+				&tg.PhotoSize{Type: "s", W: 100, H: 75},
+				&tg.PhotoSize{Type: "x", W: 800, H: 600},
+			},
+			wantOK:  true,
+			wantTyp: "x",
+		},
+		{
+			name: "long edge counts, not width",
+			sizes: []tg.PhotoSizeClass{
+				&tg.PhotoSize{Type: "x", W: 600, H: 800},
+				&tg.PhotoSize{Type: "y", W: 960, H: 1280},
+			},
+			wantOK:  true,
+			wantTyp: "y",
+		},
+		{
+			name: "skips variants with no downloadable file",
+			sizes: []tg.PhotoSizeClass{
+				&tg.PhotoStrippedSize{Type: "i"},
+				&tg.PhotoSize{Type: "x", W: 800, H: 600},
+			},
+			wantOK:  true,
+			wantTyp: "x",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := visionPhotoSize(tt.sizes)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if ok && got.Type != tt.wantTyp {
+				t.Errorf("type = %q, want %q", got.Type, tt.wantTyp)
+			}
+		})
+	}
+
+	// The inline pick must not silently become the biggest variant.
+	if got, _ := largestPhotoSize(full); got.Type != "w" {
+		t.Errorf("largestPhotoSize = %q, want %q", got.Type, "w")
 	}
 }

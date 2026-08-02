@@ -22,6 +22,7 @@ and unread state as the logged-in user.
 | `search_chats` | Search Telegram (`contacts.search`) for users, bots, groups and channels, including public ones not in the dialog list. |
 | `get_me` | Get the signed-in account: id, name, username, phone and bio. |
 | `resolve_peer` | Resolve a user, bot, group or channel by id, `@username`, t.me link or phone, and return its details. |
+| `get_file` | Download a message's media into TG_FILE_ROOT, or with `inline: true` return the image in the tool result for vision-capable clients (requires `TG_ALLOW_INLINE_MEDIA`). |
 | `get_chat_messages` | Fetch recent history from any chat (by id, @user, me, t.me link). Service messages are included, flagged with `service` and an `action` name. |
 | `search_chat_messages` | Search messages in a chat (optional filter: photo/video/document/url/...). |
 | `send_message` | Send text; optional reply_to_message_id, silent, no_webpage. |
@@ -77,6 +78,13 @@ tool call. Instead, mirroring [tdlib](https://github.com/tdlib/td)'s strategy:
 | `MCP_ADDR` | no | `127.0.0.1:8080` | Address for the MCP HTTP server. |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, or `error`. |
 | `TG_FILE_ROOT` | no | — | Base dir for send_file. Empty disables send_file with clear error. Paths are resolved inside this root; traversal rejected. |
+| `TG_ALLOW_SEND` | no | off | Grants `send_message`, `send_file`, `send_reaction`, `send_chat_action`, `send_screenshot_notification`. |
+| `TG_ALLOW_PROFILE_EDIT` | no | off | Grants `update_profile`, `update_profile_photo`. |
+| `TG_ALLOW_INLINE_MEDIA` | no | off | Lets `get_file` return image bytes in the tool result (`inline: true`) instead of writing to disk. |
+
+Every right is **opt-in** and granted only by the literal string `true`:
+anything else, including `1` and `TRUE`, leaves it off. Without any of them the
+server is read-only.
 
 ## Running
 

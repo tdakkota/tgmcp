@@ -28,6 +28,7 @@ type server struct {
 	fileRootVal      string
 	allowSend        bool
 	allowProfileEdit bool
+	allowInlineMedia bool
 }
 
 // logged wraps a typed tool handler so that every tool call is logged at debug
@@ -212,13 +213,15 @@ type getFileInput struct {
 	Chat      string `json:"chat" jsonschema:"chat target"`
 	MessageID int    `json:"message_id" jsonschema:"id of the message whose media to download"`
 	Path      string `json:"path,omitempty" jsonschema:"destination path relative to TG_FILE_ROOT; defaults to a name derived from the media"`
+	Inline    bool   `json:"inline,omitempty" jsonschema:"return the image in the tool result instead of writing it to disk; images only, requires TG_ALLOW_INLINE_MEDIA"`
 }
 
 type getFileOutput struct {
 	OK       bool   `json:"ok" jsonschema:"true on success"`
-	Path     string `json:"path" jsonschema:"path written, relative to TG_FILE_ROOT"`
+	Path     string `json:"path,omitempty" jsonschema:"path written, relative to TG_FILE_ROOT; empty when inline"`
 	MimeType string `json:"mime_type,omitempty" jsonschema:"MIME type of the downloaded file, if known"`
 	Size     int64  `json:"size,omitempty" jsonschema:"size in bytes, if known"`
+	Inline   bool   `json:"inline,omitempty" jsonschema:"true if the image was returned in the tool result"`
 }
 
 type updateProfileInput struct {
