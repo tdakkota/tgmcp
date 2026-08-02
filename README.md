@@ -22,10 +22,11 @@ and unread state as the logged-in user.
 | `search_chats` | Search Telegram (`contacts.search`) for users, bots, groups and channels, including public ones not in the dialog list. |
 | `get_me` | Get the signed-in account: id, name, username, phone and bio. |
 | `resolve_peer` | Resolve a user, bot, group or channel by id, `@username`, t.me link or phone, and return its details. |
-| `get_chat_messages` | Fetch recent history from any chat (by id, @user, me, t.me link). |
+| `get_chat_messages` | Fetch recent history from any chat (by id, @user, me, t.me link). Service messages are included, flagged with `service` and an `action` name. |
 | `search_chat_messages` | Search messages in a chat (optional filter: photo/video/document/url/...). |
 | `send_message` | Send text; optional reply_to_message_id, silent, no_webpage. |
 | `send_file` | Send file from TG_FILE_ROOT; optional caption, as_photo, reply, silent. |
+| `send_screenshot_notification` | Tell the other party of a private chat that a screenshot was taken. Posts a visible service message. |
 
 ## How it works
 

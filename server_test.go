@@ -10,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/zap"
 
+	"github.com/gotd/td/telegram/message/peer"
 	"github.com/gotd/td/tg"
 )
 
@@ -40,23 +41,24 @@ func TestToolsRegister(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		"list_unread_channels":   false,
-		"read_channel_unread":    false,
-		"mark_chat_read":         false,
-		"mark_all_channels_read": false,
-		"list_chats":             false,
-		"search_chats":           false,
-		"get_me":                 false,
-		"resolve_peer":           false,
-		"get_chat_messages":      false,
-		"search_chat_messages":   false,
-		"send_message":           false,
-		"send_file":              false,
-		"send_reaction":          false,
-		"send_chat_action":       false,
-		"get_file":               false,
-		"update_profile":         false,
-		"update_profile_photo":   false,
+		"list_unread_channels":         false,
+		"read_channel_unread":          false,
+		"mark_chat_read":               false,
+		"mark_all_channels_read":       false,
+		"list_chats":                   false,
+		"search_chats":                 false,
+		"get_me":                       false,
+		"resolve_peer":                 false,
+		"get_chat_messages":            false,
+		"search_chat_messages":         false,
+		"send_message":                 false,
+		"send_file":                    false,
+		"send_reaction":                false,
+		"send_chat_action":             false,
+		"send_screenshot_notification": false,
+		"get_file":                     false,
+		"update_profile":               false,
+		"update_profile_photo":         false,
 	}
 	for _, tool := range res.Tools {
 		if _, ok := want[tool.Name]; ok {
@@ -99,7 +101,7 @@ func TestToolsRegisterGated(t *testing.T) {
 		t.Fatalf("list tools: %v", err)
 	}
 
-	gated := []string{"send_message", "send_file", "send_reaction", "send_chat_action", "update_profile", "update_profile_photo"}
+	gated := []string{"send_message", "send_file", "send_reaction", "send_chat_action", "send_screenshot_notification", "update_profile", "update_profile_photo"}
 	for _, tool := range res.Tools {
 		for _, name := range gated {
 			if tool.Name == name {
@@ -265,5 +267,54 @@ func TestDisplayName(t *testing.T) {
 	withCollectible.SetUsernames([]tg.Username{{Username: "inactive"}, {Active: true, Username: "active"}})
 	if got := primaryUsername(&withCollectible); got != "active" {
 		t.Errorf("primaryUsername = %q, want %q", got, "active")
+	}
+}
+
+func TestActionName(t *testing.T) {
+	cases := []struct {
+		action tg.MessageActionClass
+		want   string
+	}{
+		{&tg.MessageActionScreenshotTaken{}, "screenshot_taken"},
+		{&tg.MessageActionPinMessage{}, "pin_message"},
+		{&tg.MessageActionChatAddUser{}, "chat_add_user"},
+		{&tg.MessageActionContactSignUp{}, "contact_sign_up"},
+		{nil, ""},
+	}
+	for _, c := range cases {
+		if got := actionName(c.action); got != c.want {
+			t.Errorf("actionName(%T) = %q, want %q", c.action, got, c.want)
+		}
+	}
+}
+
+func TestMessageFromClass(t *testing.T) {
+	ent := peer.NewEntities(
+		map[int64]*tg.User{7: {ID: 7, FirstName: "Anna"}},
+		nil,
+		nil,
+	)
+
+	svc := &tg.MessageService{ID: 11, Date: 1700000000, Action: &tg.MessageActionScreenshotTaken{}}
+	svc.SetFromID(&tg.PeerUser{UserID: 7})
+	got, ok := messageFromClass(svc, ent)
+	if !ok {
+		t.Fatal("service message dropped")
+	}
+	if !got.Service || got.Action != "screenshot_taken" {
+		t.Errorf("service=%v action=%q", got.Service, got.Action)
+	}
+	if got.ID != 11 || got.Author != "Anna" {
+		t.Errorf("id=%d author=%q", got.ID, got.Author)
+	}
+
+	plain := &tg.Message{ID: 12, Date: 1700000000, Message: "hi"}
+	plain.SetFromID(&tg.PeerUser{UserID: 7})
+	got, ok = messageFromClass(plain, ent)
+	if !ok {
+		t.Fatal("plain message dropped")
+	}
+	if got.Service || got.Action != "" || got.Text != "hi" {
+		t.Errorf("unexpected plain message: %+v", got)
 	}
 }

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -197,6 +199,15 @@ type sendChatActionOutput struct {
 	OK bool `json:"ok" jsonschema:"true on success"`
 }
 
+type sendScreenshotNotificationInput struct {
+	Chat      string `json:"chat" jsonschema:"private chat target (id, @username, me, t.me link)"`
+	MessageID int    `json:"message_id,omitempty" jsonschema:"id of the message that was screenshotted; omit to not point at one"`
+}
+
+type sendScreenshotNotificationOutput struct {
+	OK bool `json:"ok" jsonschema:"true on success"`
+}
+
 type getFileInput struct {
 	Chat      string `json:"chat" jsonschema:"chat target"`
 	MessageID int    `json:"message_id" jsonschema:"id of the message whose media to download"`
@@ -305,6 +316,11 @@ func (s *server) register(m *mcp.Server) {
 			Name:        "send_chat_action",
 			Description: "Send a transient chat action (typing, uploading, recording, etc).",
 		}, logged(s.lg, "send_chat_action", s.handleSendChatAction))
+
+		mcp.AddTool(m, &mcp.Tool{
+			Name:        "send_screenshot_notification",
+			Description: "Notify the other party of a private chat that a screenshot was taken. Posts a visible service message.",
+		}, logged(s.lg, "send_screenshot_notification", s.handleSendScreenshotNotification))
 	}
 
 	if s.allowProfileEdit {
@@ -454,11 +470,11 @@ func fetchMessages(ctx context.Context, api *tg.Client, p tg.InputPeerClass, off
 		iter = iter.OffsetID(offsetID)
 	}
 	for iter.Next(ctx) {
-		msg, ok := iter.Value().Msg.(*tg.Message)
+		msg, ok := messageFromClass(iter.Value().Msg, iter.Value().Entities)
 		if !ok {
 			continue
 		}
-		out = append(out, messageFromTG(msg, iter.Value().Entities))
+		out = append(out, msg)
 		if len(out) >= limit {
 			break
 		}
@@ -494,11 +510,11 @@ func (s *server) handleSearchChatMessages(ctx context.Context, _ *mcp.CallToolRe
 	}
 	var out []Message
 	for iter.Next(ctx) && len(out) < lim {
-		m, ok := iter.Value().Msg.(*tg.Message)
+		m, ok := messageFromClass(iter.Value().Msg, iter.Value().Entities)
 		if !ok {
 			continue
 		}
-		out = append(out, messageFromTG(m, iter.Value().Entities))
+		out = append(out, m)
 	}
 	if err := iter.Err(); err != nil {
 		return nil, searchChatMessagesOutput{}, errors.Wrap(err, "search")
@@ -621,6 +637,44 @@ func (s *server) handleSendChatAction(ctx context.Context, _ *mcp.CallToolReques
 		return nil, sendChatActionOutput{}, err
 	}
 	return nil, sendChatActionOutput{OK: true}, nil
+}
+
+func (s *server) handleSendScreenshotNotification(ctx context.Context, _ *mcp.CallToolRequest, in sendScreenshotNotificationInput) (*mcp.CallToolResult, sendScreenshotNotificationOutput, error) {
+	if in.Chat == "" {
+		return nil, sendScreenshotNotificationOutput{}, errors.New("chat is required")
+	}
+	p, err := s.resolvePeer(ctx, in.Chat)
+	if err != nil {
+		return nil, sendScreenshotNotificationOutput{}, err
+	}
+	switch p.(type) {
+	case *tg.InputPeerUser, *tg.InputPeerSelf:
+	default:
+		return nil, sendScreenshotNotificationOutput{}, errors.Errorf("chat %q is not a private chat: screenshot notifications only work with users", in.Chat)
+	}
+	randomID, err := randomInt64()
+	if err != nil {
+		return nil, sendScreenshotNotificationOutput{}, err
+	}
+	if _, err := s.api.MessagesSendScreenshotNotification(ctx, &tg.MessagesSendScreenshotNotificationRequest{
+		Peer:     p,
+		ReplyTo:  &tg.InputReplyToMessage{ReplyToMsgID: in.MessageID},
+		RandomID: randomID,
+	}); err != nil {
+		return nil, sendScreenshotNotificationOutput{}, errors.Wrap(err, "messages.sendScreenshotNotification")
+	}
+
+	return nil, sendScreenshotNotificationOutput{OK: true}, nil
+}
+
+// randomInt64 returns a cryptographically random ID for deduplicating sends.
+func randomInt64() (int64, error) {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return 0, errors.Wrap(err, "random id")
+	}
+
+	return int64(binary.LittleEndian.Uint64(buf[:])), nil
 }
 
 // sendChatAction dispatches a chat action name to the matching

@@ -60,6 +60,8 @@ type Message struct {
 	HasMedia  bool   `json:"has_media,omitempty" jsonschema:"true if the message has downloadable media (see get_file)"`
 	MediaType string `json:"media_type,omitempty" jsonschema:"media kind: photo or document"`
 	FileName  string `json:"file_name,omitempty" jsonschema:"file name of the attached document, if any"`
+	Service   bool   `json:"service,omitempty" jsonschema:"true for service messages, which carry an action instead of text"`
+	Action    string `json:"action,omitempty" jsonschema:"service action, e.g. screenshot_taken, pin_message, chat_add_user"`
 }
 
 // bootstrapDialogs loads the full dialog list once and seeds the cache. It
@@ -185,9 +187,8 @@ func fetchUnreadHistory(ctx context.Context, api *tg.Client, cache *dialogCache,
 	var out []Message
 	iter := messages.NewQueryBuilder(api).GetHistory(ch.peer).BatchSize(min(limit, 100)).Iter()
 	for iter.Next(ctx) {
-		msg, ok := iter.Value().Msg.(*tg.Message)
+		msg, ok := messageFromClass(iter.Value().Msg, iter.Value().Entities)
 		if !ok {
-			// Skip service messages and the like.
 			continue
 		}
 		// History is returned newest-first; once we reach a message that is
@@ -195,7 +196,7 @@ func fetchUnreadHistory(ctx context.Context, api *tg.Client, cache *dialogCache,
 		if msg.ID <= ch.readInboxMaxID {
 			break
 		}
-		out = append(out, messageFromTG(msg, iter.Value().Entities))
+		out = append(out, msg)
 		if len(out) >= limit {
 			break
 		}
@@ -307,12 +308,26 @@ func channelFromEntity(c *tg.Channel) UnreadChannel {
 	}
 }
 
+// messageFromClass converts a history item to a Message. Reports false for
+// items that carry no content, such as tombstones of deleted messages.
+func messageFromClass(m tg.NotEmptyMessage, ent entities) (Message, bool) {
+	switch v := m.(type) {
+	case *tg.Message:
+		return messageFromTG(v, ent), true
+	case *tg.MessageService:
+		return messageFromService(v, ent), true
+	default:
+		return Message{}, false
+	}
+}
+
 func messageFromTG(msg *tg.Message, ent entities) Message {
+	from, hasFrom := msg.GetFromID()
 	m := Message{
 		ID:     msg.ID,
 		Date:   time.Unix(int64(msg.Date), 0).UTC().Format(time.RFC3339),
 		Text:   msg.Message,
-		Author: authorName(msg, ent),
+		Author: authorName(ent, from, hasFrom),
 		Out:    msg.Out,
 	}
 	if rt, ok := msg.GetReplyTo(); ok {
@@ -338,10 +353,56 @@ func messageFromTG(msg *tg.Message, ent entities) Message {
 	return m
 }
 
-// authorName resolves a human-readable sender name from a message, when the
-// sender is a user present in the entities.
-func authorName(msg *tg.Message, ent entities) string {
-	from, ok := msg.GetFromID()
+// messageFromService converts a service message, such as "took a screenshot"
+// or "pinned a message", into a Message carrying the action name.
+func messageFromService(msg *tg.MessageService, ent entities) Message {
+	from, hasFrom := msg.GetFromID()
+	m := Message{
+		ID:      msg.ID,
+		Date:    time.Unix(int64(msg.Date), 0).UTC().Format(time.RFC3339),
+		Author:  authorName(ent, from, hasFrom),
+		Out:     msg.Out,
+		Service: true,
+		Action:  actionName(msg.Action),
+	}
+	if rt, ok := msg.GetReplyTo(); ok {
+		if rtm, ok := rt.(*tg.MessageReplyHeader); ok {
+			m.ReplyToID = rtm.ReplyToMsgID
+		}
+	}
+
+	return m
+}
+
+// actionName converts a service action to a snake_case name, derived from its
+// TL type: messageActionScreenshotTaken becomes screenshot_taken.
+func actionName(a tg.MessageActionClass) string {
+	if a == nil {
+		return ""
+	}
+
+	return snakeCase(strings.TrimPrefix(a.TypeName(), "messageAction"))
+}
+
+// snakeCase converts a CamelCase TL type name to snake_case.
+func snakeCase(s string) string {
+	var b strings.Builder
+	for i, r := range s {
+		if r >= 'A' && r <= 'Z' {
+			if i > 0 {
+				b.WriteByte('_')
+			}
+			r += 'a' - 'A'
+		}
+		b.WriteRune(r)
+	}
+
+	return b.String()
+}
+
+// authorName resolves a human-readable sender name, when the sender is a user
+// present in the entities.
+func authorName(ent entities, from tg.PeerClass, ok bool) string {
 	if !ok {
 		return ""
 	}
