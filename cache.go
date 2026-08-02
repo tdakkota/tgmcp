@@ -154,23 +154,36 @@ func (c *dialogCache) get(id int64) (UnreadChannel, bool) {
 
 // getPeer returns a cached dialog matching the exact input peer namespace.
 func (c *dialogCache) getPeer(p any) (UnreadChannel, bool) {
-	var key string
-	switch v := p.(type) {
-	case *tg.InputPeerChannel:
-		key = dialogKeyParts("channel", v.ChannelID)
-	case *tg.InputPeerChat:
-		key = dialogKeyParts("chat", v.ChatID)
-	case *tg.InputPeerUser:
-		key = dialogKeyParts("user", v.UserID)
-	default:
+	key, ok := peerCacheKey(p)
+	if !ok {
 		return UnreadChannel{}, false
 	}
 
+	return c.getKey(key)
+}
+
+// getKey returns the cached dialog stored under key.
+func (c *dialogCache) getKey(key string) (UnreadChannel, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	ch, ok := c.channels[key]
 	return ch, ok
+}
+
+// peerCacheKey maps an input peer to its cache key. Reports false for peers
+// that have no stable key, such as InputPeerSelf.
+func peerCacheKey(p any) (string, bool) {
+	switch v := p.(type) {
+	case *tg.InputPeerChannel:
+		return dialogKeyParts("channel", v.ChannelID), true
+	case *tg.InputPeerChat:
+		return dialogKeyParts("chat", v.ChatID), true
+	case *tg.InputPeerUser:
+		return dialogKeyParts("user", v.UserID), true
+	default:
+		return "", false
+	}
 }
 
 // set upserts a fully-resolved channel and persists it. Used to resync a single
@@ -256,9 +269,15 @@ func (c *dialogCache) setUnreadMark(channelID int64, mark bool) {
 	})
 }
 
-// markRead clears the unread state of a channel after we mark it read locally.
-func (c *dialogCache) markRead(channelID int64) {
-	c.update(channelID, func(ch *UnreadChannel) {
+// markReadPeer clears the unread state of a dialog after we mark it read
+// locally. Peers that are not cached dialogs are ignored.
+func (c *dialogCache) markReadPeer(p any) {
+	key, ok := peerCacheKey(p)
+	if !ok {
+		return
+	}
+
+	c.updateKey(key, func(ch *UnreadChannel) {
 		ch.UnreadCount = 0
 		ch.UnreadMark = false
 	})
@@ -267,8 +286,13 @@ func (c *dialogCache) markRead(channelID int64) {
 // update applies mutate to a cached channel under lock and persists the result.
 // Unknown channels are ignored.
 func (c *dialogCache) update(channelID int64, mutate func(*UnreadChannel)) {
+	c.updateKey(dialogKeyParts("channel", channelID), mutate)
+}
+
+// updateKey applies mutate to the dialog stored under key and persists the
+// result. Unknown keys are ignored.
+func (c *dialogCache) updateKey(key string, mutate func(*UnreadChannel)) {
 	c.mu.Lock()
-	key := dialogKeyParts("channel", channelID)
 	ch, ok := c.channels[key]
 	if ok {
 		mutate(&ch)

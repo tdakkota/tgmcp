@@ -360,33 +360,45 @@ func authorName(msg *tg.Message, ent entities) string {
 	return name
 }
 
-// markChannelRead marks all messages in a channel as read up to and including
-// the latest message (MaxID=0 means "all messages").
-func markChannelRead(ctx context.Context, api *tg.Client, cache *dialogCache, ch UnreadChannel) error {
-	ipc, ok := ch.peer.(*tg.InputPeerChannel)
-	if !ok {
-		return errors.Errorf("peer for channel %d is not an InputPeerChannel", ch.ID)
-	}
-	_, err := api.ChannelsReadHistory(ctx, &tg.ChannelsReadHistoryRequest{
-		Channel: &tg.InputChannel{
-			ChannelID:  ipc.ChannelID,
-			AccessHash: ipc.AccessHash,
-		},
-		MaxID: 0, // 0 = mark everything as read
-	})
-	if err != nil {
-		if isChannelGone(err) {
-			cache.remove(ch.ID)
+// markPeerRead marks all messages in a dialog as read up to and including the
+// latest message (MaxID=0 means "all messages"). Channels and supergroups use
+// channels.readHistory, users and legacy groups messages.readHistory.
+func markPeerRead(ctx context.Context, api *tg.Client, cache *dialogCache, p tg.InputPeerClass) error {
+	switch v := p.(type) {
+	case *tg.InputPeerChannel:
+		_, err := api.ChannelsReadHistory(ctx, &tg.ChannelsReadHistoryRequest{
+			Channel: &tg.InputChannel{
+				ChannelID:  v.ChannelID,
+				AccessHash: v.AccessHash,
+			},
+			MaxID: 0,
+		})
+		if err != nil {
+			if isChannelGone(err) {
+				cache.remove(v.ChannelID)
 
-			return nil
+				return nil
+			}
+
+			return errors.Wrap(err, "channels.readHistory")
 		}
-
-		return errors.Wrap(err, "channels.readHistory")
+	default:
+		if _, err := api.MessagesReadHistory(ctx, &tg.MessagesReadHistoryRequest{
+			Peer:  p,
+			MaxID: 0,
+		}); err != nil {
+			return errors.Wrap(err, "messages.readHistory")
+		}
 	}
 
-	cache.markRead(ch.ID)
+	cache.markReadPeer(p)
 
 	return nil
+}
+
+// markChannelRead marks a cached dialog as read.
+func markChannelRead(ctx context.Context, api *tg.Client, cache *dialogCache, ch UnreadChannel) error {
+	return markPeerRead(ctx, api, cache, rebuildPeer(ch))
 }
 
 // markAllChannelsRead marks every unread channel as read and returns how many

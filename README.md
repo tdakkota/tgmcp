@@ -16,9 +16,11 @@ and unread state as the logged-in user.
 | --- | --- |
 | `list_unread_channels` | List broadcast channels that currently have unread messages, with unread counts. |
 | `read_channel_unread` | Read the unread messages of a channel (by `@username` or numeric ID), newest first. Reading does **not** mark them as read. |
-| `mark_channel_read` | Mark all messages in a specific broadcast channel as read. |
-| `mark_all_channels_read` | Mark every unread broadcast channel as read in one call. |
-| `list_chats` | List cached dialogs (private, groups, supergroups, channels) with id/title/username/type/unread. |
+| `mark_chat_read` | Mark all messages in a dialog as read: private chats, groups, supergroups and channels. |
+| `mark_all_channels_read` | Mark every unread broadcast channel as read in one call. Does not touch private chats or groups. |
+| `list_chats` | List cached dialogs (private, groups, supergroups, channels) with id/title/username/type/unread. Optional `query` matches title or username. |
+| `get_me` | Get the signed-in account: id, name, username, phone and bio. |
+| `resolve_peer` | Resolve a user, bot, group or channel by id, `@username`, t.me link or phone, and return its details. |
 | `get_chat_messages` | Fetch recent history from any chat (by id, @user, me, t.me link). |
 | `search_chat_messages` | Search messages in a chat (optional filter: photo/video/document/url/...). |
 | `send_message` | Send text; optional reply_to_message_id, silent, no_webpage. |

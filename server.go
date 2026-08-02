@@ -65,12 +65,27 @@ type readChannelOutput struct {
 	Messages []Message     `json:"messages" jsonschema:"unread messages, newest first"`
 }
 
-type markChannelReadInput struct {
-	Channel string `json:"channel" jsonschema:"channel @username or numeric ID, as returned by list_unread_channels"`
+type markChatReadInput struct {
+	Chat string `json:"chat" jsonschema:"chat target (id, @username, me, t.me link)"`
 }
 
-type markChannelReadOutput struct {
-	Channel UnreadChannel `json:"channel" jsonschema:"the channel that was marked as read"`
+type markChatReadOutput struct {
+	Chat UnreadChannel `json:"chat" jsonschema:"the dialog that was marked as read"`
+}
+
+// getMeInput has no parameters.
+type getMeInput struct{}
+
+type getMeOutput struct {
+	User PeerInfo `json:"user" jsonschema:"the signed-in account"`
+}
+
+type resolvePeerInput struct {
+	Target string `json:"target" jsonschema:"peer target (id, @username, me, t.me link, phone)"`
+}
+
+type resolvePeerOutput struct {
+	Peer PeerInfo `json:"peer" jsonschema:"the resolved peer"`
 }
 
 // markAllChannelsReadInput has no parameters.
@@ -81,6 +96,7 @@ type markAllChannelsReadOutput struct {
 }
 
 type listChatsInput struct {
+	Query      string `json:"query,omitempty" jsonschema:"case-insensitive substring match on title or @username"`
 	Type       string `json:"type,omitempty" jsonschema:"filter by type: private, group, supergroup, channel"`
 	UnreadOnly bool   `json:"unread_only,omitempty" jsonschema:"only return dialogs with unread>0"`
 	Limit      int    `json:"limit,omitempty" jsonschema:"maximum results (default 100)"`
@@ -214,19 +230,29 @@ func (s *server) register(m *mcp.Server) {
 	}, logged(s.lg, "read_channel_unread", s.handleReadChannel))
 
 	mcp.AddTool(m, &mcp.Tool{
-		Name:        "mark_channel_read",
-		Description: "Mark all messages in a specific Telegram broadcast channel as read.",
-	}, logged(s.lg, "mark_channel_read", s.handleMarkChannelRead))
+		Name:        "mark_chat_read",
+		Description: "Mark all messages in a dialog as read. Works for private chats, groups, supergroups and channels.",
+	}, logged(s.lg, "mark_chat_read", s.handleMarkChatRead))
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "mark_all_channels_read",
-		Description: "Mark all unread Telegram broadcast channels as read in one call.",
+		Description: "Mark all unread Telegram broadcast channels as read in one call. Does not touch private chats or groups.",
 	}, logged(s.lg, "mark_all_channels_read", s.handleMarkAllChannelsRead))
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "list_chats",
-		Description: "List cached dialogs with id, title, username, type and unread count.",
+		Description: "List cached dialogs with id, title, username, type and unread count. Optional query matches title or username.",
 	}, logged(s.lg, "list_chats", s.handleListChats))
+
+	mcp.AddTool(m, &mcp.Tool{
+		Name:        "get_me",
+		Description: "Get the signed-in Telegram account: id, name, username, phone and bio.",
+	}, logged(s.lg, "get_me", s.handleGetMe))
+
+	mcp.AddTool(m, &mcp.Tool{
+		Name:        "resolve_peer",
+		Description: "Resolve a user, bot, group or channel by id, @username, t.me link or phone, and return its details.",
+	}, logged(s.lg, "resolve_peer", s.handleResolvePeer))
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "get_chat_messages",
@@ -296,21 +322,19 @@ func (s *server) handleReadChannel(ctx context.Context, _ *mcp.CallToolRequest, 
 	return nil, readChannelOutput{Channel: ch, Messages: msgs}, nil
 }
 
-func (s *server) handleMarkChannelRead(ctx context.Context, _ *mcp.CallToolRequest, in markChannelReadInput) (*mcp.CallToolResult, markChannelReadOutput, error) {
-	if in.Channel == "" {
-		return nil, markChannelReadOutput{}, errors.New("channel is required")
+func (s *server) handleMarkChatRead(ctx context.Context, _ *mcp.CallToolRequest, in markChatReadInput) (*mcp.CallToolResult, markChatReadOutput, error) {
+	if in.Chat == "" {
+		return nil, markChatReadOutput{}, errors.New("chat is required")
 	}
-	ch, ok := s.cache.find(in.Channel)
-	if !ok {
-		return nil, markChannelReadOutput{}, errors.Errorf("channel %q not found in dialogs", in.Channel)
+	p, err := s.resolvePeer(ctx, in.Chat)
+	if err != nil {
+		return nil, markChatReadOutput{}, err
 	}
-	if !ch.Broadcast {
-		return nil, markChannelReadOutput{}, errors.Errorf("channel %q is not a broadcast channel", in.Channel)
+	if err := markPeerRead(ctx, s.api, s.cache, p); err != nil {
+		return nil, markChatReadOutput{}, err
 	}
-	if err := markChannelRead(ctx, s.api, s.cache, ch); err != nil {
-		return nil, markChannelReadOutput{}, err
-	}
-	return nil, markChannelReadOutput{Channel: ch}, nil
+
+	return nil, markChatReadOutput{Chat: s.peerToChannel(p)}, nil
 }
 
 func (s *server) handleMarkAllChannelsRead(ctx context.Context, _ *mcp.CallToolRequest, _ markAllChannelsReadInput) (*mcp.CallToolResult, markAllChannelsReadOutput, error) {
@@ -342,6 +366,15 @@ func (s *server) handleListChats(_ context.Context, _ *mcp.CallToolRequest, in l
 		}
 		all = f
 	}
+	if q := strings.TrimPrefix(strings.TrimSpace(in.Query), "@"); q != "" {
+		var f []UnreadChannel
+		for _, c := range all {
+			if matchesDialog(c, q) {
+				f = append(f, c)
+			}
+		}
+		all = f
+	}
 	lim := in.Limit
 	if lim <= 0 || lim > 100 {
 		lim = 100
@@ -359,6 +392,13 @@ func (s *server) handleListChats(_ context.Context, _ *mcp.CallToolRequest, in l
 		all = all[:lim]
 	}
 	return nil, listChatsOutput{Chats: all, Limit: lim, Limited: limited, TotalMatched: total}, nil
+}
+
+// matchesDialog reports whether a dialog title or username contains q,
+// case-insensitively.
+func matchesDialog(ch UnreadChannel, q string) bool {
+	return strings.Contains(strings.ToLower(ch.Title), strings.ToLower(q)) ||
+		strings.Contains(strings.ToLower(ch.Username), strings.ToLower(q))
 }
 
 func (s *server) handleGetChatMessages(ctx context.Context, _ *mcp.CallToolRequest, in getChatMessagesInput) (*mcp.CallToolResult, getChatMessagesOutput, error) {
