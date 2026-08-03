@@ -13,7 +13,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/gotd/td/telegram/message"
-	"github.com/gotd/td/telegram/message/styling"
 	"github.com/gotd/td/telegram/query/messages"
 	"github.com/gotd/td/tg"
 )
@@ -135,6 +134,7 @@ type searchChatMessagesOutput struct {
 type sendMessageInput struct {
 	Chat             string `json:"chat" jsonschema:"chat target"`
 	Text             string `json:"text" jsonschema:"message text"`
+	ParseMode        string `json:"parse_mode,omitempty" jsonschema:"text format: plain (default, sent as-is) or markdown"`
 	ReplyToMessageID int    `json:"reply_to_message_id,omitempty" jsonschema:"reply to this message id"`
 	Silent           bool   `json:"silent,omitempty" jsonschema:"send without notification"`
 	NoWebpage        bool   `json:"no_webpage,omitempty" jsonschema:"disable link preview"`
@@ -149,6 +149,7 @@ type sendFileInput struct {
 	Chat             string `json:"chat" jsonschema:"chat target"`
 	Path             string `json:"path" jsonschema:"path relative to TG_FILE_ROOT or absolute inside it"`
 	Caption          string `json:"caption,omitempty" jsonschema:"optional caption"`
+	ParseMode        string `json:"parse_mode,omitempty" jsonschema:"caption format: plain (default, sent as-is) or markdown"`
 	AsPhoto          bool   `json:"as_photo,omitempty" jsonschema:"send as photo if true"`
 	ReplyToMessageID int    `json:"reply_to_message_id,omitempty" jsonschema:"reply to this message id"`
 	Silent           bool   `json:"silent,omitempty" jsonschema:"send without notification"`
@@ -281,12 +282,12 @@ func (s *server) register(m *mcp.Server) {
 	if s.allowSend {
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "send_message",
-			Description: "Send text message to a chat. Supports reply_to_message_id, silent, no_webpage.",
+			Description: "Send text message to a chat. Supports parse_mode (plain or markdown), reply_to_message_id, silent, no_webpage.",
 		}, s.handleSendMessage)
 
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "send_file",
-			Description: "Send file from configured TG_FILE_ROOT. Supports caption, as_photo, reply_to_message_id, silent.",
+			Description: "Send file from configured TG_FILE_ROOT. Supports caption with parse_mode (plain or markdown), as_photo, reply_to_message_id, silent.",
 		}, s.handleSendFile)
 
 		mcp.AddTool(m, &mcp.Tool{
@@ -537,7 +538,11 @@ func (s *server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, 
 	if in.ReplyToMessageID > 0 {
 		b.Reply(in.ReplyToMessageID)
 	}
-	upd, err := b.Text(ctx, in.Text)
+	text, err := s.styledText(in.Text, in.ParseMode)
+	if err != nil {
+		return nil, sendMessageOutput{}, err
+	}
+	upd, err := b.StyledText(ctx, text)
 	if err != nil {
 		return nil, sendMessageOutput{}, errors.Wrap(err, "send")
 	}
@@ -568,11 +573,15 @@ func (s *server) handleSendFile(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if in.ReplyToMessageID > 0 {
 		b.Reply(in.ReplyToMessageID)
 	}
+	caption, err := s.styledText(in.Caption, in.ParseMode)
+	if err != nil {
+		return nil, sendFileOutput{}, err
+	}
 	var upd tg.UpdatesClass
 	if in.AsPhoto {
-		upd, err = b.Upload(message.FromPath(abs)).Photo(ctx, styling.Plain(in.Caption))
+		upd, err = b.Upload(message.FromPath(abs)).Photo(ctx, caption)
 	} else {
-		upd, err = b.Upload(message.FromPath(abs)).File(ctx, styling.Plain(in.Caption))
+		upd, err = b.Upload(message.FromPath(abs)).File(ctx, caption)
 	}
 	if err != nil {
 		return nil, sendFileOutput{}, errors.Wrap(err, "send file")

@@ -25,8 +25,8 @@ and unread state as the logged-in user.
 | `get_file` | Download a message's media into TG_FILE_ROOT, or with `inline: true` return the image in the tool result for vision-capable clients (requires `TG_ALLOW_INLINE_MEDIA`). |
 | `get_chat_messages` | Fetch recent history from any chat (by id, @user, me, t.me link). Service messages are included, flagged with `service` and an `action` name. |
 | `search_chat_messages` | Search messages in a chat (optional filter: photo/video/document/url/...). |
-| `send_message` | Send text; optional reply_to_message_id, silent, no_webpage. |
-| `send_file` | Send file from TG_FILE_ROOT; optional caption, as_photo, reply, silent. |
+| `send_message` | Send text; optional parse_mode, reply_to_message_id, silent, no_webpage. |
+| `send_file` | Send file from TG_FILE_ROOT; optional caption, parse_mode, as_photo, reply, silent. |
 | `send_screenshot_notification` | Tell a chat that a screenshot was taken. Posts a visible service message. |
 
 ## How it works
@@ -85,6 +85,28 @@ tool call. Instead, mirroring [tdlib](https://github.com/tdlib/td)'s strategy:
 Every right is **opt-in** and granted only by the literal string `true`:
 anything else, including `1` and `TRUE`, leaves it off. Without any of them the
 server is read-only.
+
+### Formatting
+
+`send_message` and `send_file` take a `parse_mode`:
+
+| Value | Behaviour |
+| --- | --- |
+| `plain` (default) | Text is sent verbatim; Markdown syntax stays literal. |
+| `markdown` | CommonMark is parsed into Telegram message entities. |
+
+Under `markdown`, `**bold**`, `_italic_`, `~~strike~~`, `` `code` ``, fenced code
+blocks, `[links](url)`, `> quotes`, `tg://user?id=N` mentions and custom emoji
+become entities. Headings, lists and tables have no Telegram equivalent and are
+sent as plain text with their markers intact — `# Heading` arrives as
+`# Heading`, not as bold.
+
+Mentions need the target's access hash, so `tg://user?id=N` only works for users
+already in the dialog cache; anyone else fails the call rather than sending a
+broken mention.
+
+The default stays `plain` on purpose: flipping it would silently reformat
+messages containing `_` or `*`, which is common in log lines and identifiers.
 
 ### Telemetry
 
