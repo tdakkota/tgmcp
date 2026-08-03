@@ -38,6 +38,9 @@ type Config struct {
 //	LOG_LEVEL        - log level: debug, info, warn, error (default: "info")
 //	TG_FILE_ROOT     - directory from which send_file may read files (default: disabled)
 //
+// Telemetry is configured by the standard OTEL_* variables read by
+// [github.com/go-faster/sdk/app], see README.
+//
 // All rights are opt-in: set the variable to "true" to grant one.
 //
 //	TG_ALLOW_SEND         - enable send_message, send_file, send_reaction, send_chat_action, send_screenshot_notification

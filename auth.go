@@ -35,7 +35,7 @@ func runAuth(ctx context.Context, cfg Config) error {
 		return err
 	}
 
-	client, waiter, err := newClient(cfg, dispatcher, lg)
+	client, waiter, err := newClient(cfg, dispatcher, lg, nil)
 	if err != nil {
 		return err
 	}

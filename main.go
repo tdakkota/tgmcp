@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/go-faster/errors"
+	"github.com/go-faster/sdk/app"
 	"github.com/gotd/contrib/bbolt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
@@ -27,12 +28,12 @@ import (
 	"github.com/gotd/td/tg"
 )
 
-func main() {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
+// modulePath is reported as the version of this build by [app.Run].
+const modulePath = "github.com/gotd/tgmcp"
 
-	if err := rootCmd().ExecuteContext(ctx); err != nil {
-		if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+func main() {
+	if err := rootCmd().ExecuteContext(context.Background()); err != nil {
+		if errors.Is(err, context.Canceled) {
 			return
 		}
 		fmt.Fprintf(os.Stderr, "Error: %+v\n", err)
@@ -58,7 +59,12 @@ func rootCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return runAuth(cmd.Context(), cfg)
+
+				// Interactive command: no telemetry, own signal handling.
+				ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt)
+				defer cancel()
+
+				return runAuth(ctx, cfg)
 			},
 		},
 		&cobra.Command{
@@ -70,7 +76,24 @@ func rootCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return runServe(cmd.Context(), cfg)
+
+				logCfg, err := zapConfig(cfg)
+				if err != nil {
+					return err
+				}
+
+				// app.Run owns signal handling, graceful shutdown and process
+				// exit, so it never returns.
+				app.Run(func(ctx context.Context, lg *zap.Logger, t *app.Telemetry) error {
+					return runServe(ctx, cfg, lg, t)
+				},
+					app.WithContext(cmd.Context()),
+					app.WithServiceName("tgmcp"),
+					app.WithModulePath(modulePath),
+					app.WithZapConfig(logCfg),
+				)
+
+				return nil
 			},
 		},
 	)
@@ -86,12 +109,7 @@ func rootCmd() *cobra.Command {
 // then kept live by the gotd updates manager (gap-safe via getDifference). This
 // avoids re-fetching the dialog list on every tool call, which caused
 // FLOOD_WAIT.
-func runServe(ctx context.Context, cfg Config) error {
-	lg, err := newLogger(cfg)
-	if err != nil {
-		return err
-	}
-
+func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry) error {
 	db, err := openStateDB(cfg)
 	if err != nil {
 		return err
@@ -150,7 +168,12 @@ func runServe(ctx context.Context, cfg Config) error {
 		Logger: lg.Named("updates"),
 	})
 
-	client, waiter, err := newClient(cfg, mgr, lg)
+	client, waiter, err := newClient(cfg, mgr, lg, t)
+	if err != nil {
+		return err
+	}
+
+	instrument, err := newMCPInstrument(t)
 	if err != nil {
 		return err
 	}
@@ -189,13 +212,14 @@ func runServe(ctx context.Context, cfg Config) error {
 				Version: "0.1.0",
 			}, nil)
 			srv.register(m)
+			m.AddReceivingMiddleware(instrument.Middleware())
 
 			handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 				return m
 			}, nil)
 			httpSrv := &http.Server{
 				Addr:              cfg.HTTPAddr,
-				Handler:           logHTTP(lg, handler),
+				Handler:           instrumentHTTP(lg, t, handler),
 				ReadHeaderTimeout: 10 * time.Second,
 			}
 
@@ -247,36 +271,5 @@ func runServe(ctx context.Context, cfg Config) error {
 
 			return g.Wait()
 		})
-	})
-}
-
-// statusRecorder captures the HTTP status code written by a handler.
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-}
-
-func (r *statusRecorder) WriteHeader(code int) {
-	r.status = code
-	r.ResponseWriter.WriteHeader(code)
-}
-
-// logHTTP wraps an http.Handler and logs every request at debug level with its
-// method, path, MCP session id, status, and duration.
-func logHTTP(lg *zap.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-
-		next.ServeHTTP(rec, r)
-
-		lg.Debug("HTTP request",
-			zap.String("method", r.Method),
-			zap.String("path", r.URL.Path),
-			zap.String("session", r.Header.Get("Mcp-Session-Id")),
-			zap.Int("status", rec.status),
-			zap.Duration("took", time.Since(start)),
-			zap.String("remote", r.RemoteAddr),
-		)
 	})
 }

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/go-faster/errors"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -29,26 +28,6 @@ type server struct {
 	allowSend        bool
 	allowProfileEdit bool
 	allowInlineMedia bool
-}
-
-// logged wraps a typed tool handler so that every tool call is logged at debug
-// level with its input, output, duration, and any error.
-func logged[In, Out any](lg *zap.Logger, name string, h mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
-	return func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
-		start := time.Now()
-		lg.Debug("Tool call", zap.String("tool", name), zap.Any("input", in))
-
-		res, out, err := h(ctx, req, in)
-
-		lg.Debug("Tool done",
-			zap.String("tool", name),
-			zap.Duration("took", time.Since(start)),
-			zap.Any("output", out),
-			zap.Error(err),
-		)
-
-		return res, out, err
-	}
 }
 
 // listChannelsInput has no parameters.
@@ -247,95 +226,95 @@ func (s *server) register(m *mcp.Server) {
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "list_unread_channels",
 		Description: "List Telegram broadcast channels that currently have unread messages, with their unread counts.",
-	}, logged(s.lg, "list_unread_channels", s.handleListChannels))
+	}, s.handleListChannels)
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "read_channel_unread",
 		Description: "Read the unread messages of a Telegram channel, newest first. Reading does not mark them as read.",
-	}, logged(s.lg, "read_channel_unread", s.handleReadChannel))
+	}, s.handleReadChannel)
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "mark_chat_read",
 		Description: "Mark all messages in a dialog as read. Works for private chats, groups, supergroups and channels.",
-	}, logged(s.lg, "mark_chat_read", s.handleMarkChatRead))
+	}, s.handleMarkChatRead)
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "mark_all_channels_read",
 		Description: "Mark all unread Telegram broadcast channels as read in one call. Does not touch private chats or groups.",
-	}, logged(s.lg, "mark_all_channels_read", s.handleMarkAllChannelsRead))
+	}, s.handleMarkAllChannelsRead)
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "list_chats",
 		Description: "List cached dialogs with id, title, username, type and unread count. Optional query matches title or username.",
-	}, logged(s.lg, "list_chats", s.handleListChats))
+	}, s.handleListChats)
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "get_me",
 		Description: "Get the signed-in Telegram account: id, name, username, phone and bio.",
-	}, logged(s.lg, "get_me", s.handleGetMe))
+	}, s.handleGetMe)
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "search_chats",
 		Description: "Search Telegram for users, bots, groups and channels by name or @username, including public ones not in the dialog list.",
-	}, logged(s.lg, "search_chats", s.handleSearchChats))
+	}, s.handleSearchChats)
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "resolve_peer",
 		Description: "Resolve a user, bot, group or channel by id, @username, t.me link or phone, and return its details.",
-	}, logged(s.lg, "resolve_peer", s.handleResolvePeer))
+	}, s.handleResolvePeer)
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "get_chat_messages",
 		Description: "Fetch recent messages from a chat by target (id, @username, me, t.me link).",
-	}, logged(s.lg, "get_chat_messages", s.handleGetChatMessages))
+	}, s.handleGetChatMessages)
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "search_chat_messages",
 		Description: "Search messages in a chat by query. Optional filter: photo, video, document, url, photos, photo_video, voice, music.",
-	}, logged(s.lg, "search_chat_messages", s.handleSearchChatMessages))
+	}, s.handleSearchChatMessages)
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "get_file",
 		Description: "Download the media attached to a message into TG_FILE_ROOT.",
-	}, logged(s.lg, "get_file", s.handleGetFile))
+	}, s.handleGetFile)
 
 	if s.allowSend {
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "send_message",
 			Description: "Send text message to a chat. Supports reply_to_message_id, silent, no_webpage.",
-		}, logged(s.lg, "send_message", s.handleSendMessage))
+		}, s.handleSendMessage)
 
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "send_file",
 			Description: "Send file from configured TG_FILE_ROOT. Supports caption, as_photo, reply_to_message_id, silent.",
-		}, logged(s.lg, "send_file", s.handleSendFile))
+		}, s.handleSendFile)
 
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "send_reaction",
 			Description: "React to a message with an emoji. Empty emoji removes the reaction.",
-		}, logged(s.lg, "send_reaction", s.handleSendReaction))
+		}, s.handleSendReaction)
 
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "send_chat_action",
 			Description: "Send a transient chat action (typing, uploading, recording, etc).",
-		}, logged(s.lg, "send_chat_action", s.handleSendChatAction))
+		}, s.handleSendChatAction)
 
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "send_screenshot_notification",
 			Description: "Notify a chat that a screenshot was taken. Posts a visible service message.",
-		}, logged(s.lg, "send_screenshot_notification", s.handleSendScreenshotNotification))
+		}, s.handleSendScreenshotNotification)
 	}
 
 	if s.allowProfileEdit {
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "update_profile",
 			Description: "Update the account's first name, last name and/or bio (about text).",
-		}, logged(s.lg, "update_profile", s.handleUpdateProfile))
+		}, s.handleUpdateProfile)
 
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "update_profile_photo",
 			Description: "Set the account's profile photo from a file under TG_FILE_ROOT.",
-		}, logged(s.lg, "update_profile_photo", s.handleUpdateProfilePhoto))
+		}, s.handleUpdateProfilePhoto)
 	}
 }
 

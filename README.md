@@ -86,6 +86,39 @@ Every right is **opt-in** and granted only by the literal string `true`:
 anything else, including `1` and `TRUE`, leaves it off. Without any of them the
 server is read-only.
 
+### Telemetry
+
+`tgmcp serve` runs under [`go-faster/sdk/app`][sdk], so it emits OpenTelemetry
+traces, metrics and logs, and is configured entirely through the standard
+`OTEL_*` environment variables.
+
+[sdk]: https://github.com/go-faster/sdk
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `OTEL_TRACES_EXPORTER` | `otlp` | `otlp`, `stdout`, `stderr`, or `none`. |
+| `OTEL_METRICS_EXPORTER` | `otlp` | `otlp`, `prometheus`, `stdout`, `stderr`, or `none`. |
+| `OTEL_LOGS_EXPORTER` | `otlp` | `otlp`, `stdout`, `stderr`, or `none`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `localhost:4317` | Collector endpoint. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | `grpc` or `http/protobuf`. |
+| `OTEL_EXPORTER_PROMETHEUS_HOST` / `_PORT` | `localhost` / `9464` | Scrape endpoint when the exporter is `prometheus`. |
+| `OTEL_LOG_LEVEL` | — | Overrides `LOG_LEVEL`. |
+| `PPROF_ADDR` | — | Serves `/debug/pprof` when set. |
+
+> The exporters default to **OTLP over gRPC to `localhost:4317`**. Without a
+> collector there, the SDK retries exports in the background and logs errors.
+> Set `OTEL_TRACES_EXPORTER=none OTEL_METRICS_EXPORTER=none
+> OTEL_LOGS_EXPORTER=none` to run without telemetry.
+
+Instrumentation:
+
+- **Traces**: one span per MCP request (named `tools/call <tool>`), a child span
+  per MTProto call (`tg.rpc: <method>`), and an HTTP server span that continues
+  the client's trace context if it sends one.
+- **Metrics**: `mcp.request.{count,failures,duration}` by method and tool,
+  `tg.rpc.{count,failures,duration}` by MTProto method, and
+  `tg.flood_wait.count`. Go runtime metrics are exported too.
+
 ## Running
 
 The server speaks MCP over **HTTP** (streamable transport):
@@ -115,8 +148,9 @@ Point your MCP client at the HTTP endpoint (adjust the address to `MCP_ADDR`):
 ## Notes
 
 - Logs are written as JSON to **stderr**, so journald (or any supervisor)
-  captures them. Set `LOG_LEVEL=debug` to see every MTProto call and tool
-  invocation.
+  captures them, and are mirrored to the OTLP logs exporter. Set
+  `LOG_LEVEL=debug` to see every MTProto call and MCP request. Set
+  `OTEL_ZAP_TEE=false` to stop writing them to stderr.
 - Unread detection compares each message ID against the dialog's
   `read_inbox_max_id`; messages newer than that boundary are returned.
 - `list_chats`, `get_chat_messages`, and `search_chat_messages` include
