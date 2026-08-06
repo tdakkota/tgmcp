@@ -9,7 +9,6 @@ import (
 
 	"github.com/go-faster/errors"
 	"github.com/go-faster/sdk/app"
-	"github.com/gotd/contrib/middleware/floodwait"
 	"github.com/gotd/contrib/middleware/ratelimit"
 	"github.com/gotd/contrib/oteltg"
 	"github.com/gotd/log/logzap"
@@ -64,15 +63,9 @@ func newLogger(cfg Config) (*zap.Logger, error) {
 //
 // t is optional: when non-nil, every MTProto call is traced and measured. Pass
 // nil for commands that run outside [app.Run], such as "tgmcp auth".
-//
-// The returned waiter must wrap client.Run:
-//
-//	return waiter.Run(ctx, func(ctx context.Context) error {
-//	    return client.Run(ctx, handler)
-//	})
-func newClient(cfg Config, handler telegram.UpdateHandler, lg *zap.Logger, t *app.Telemetry) (*telegram.Client, *floodwait.Waiter, error) {
+func newClient(cfg Config, handler telegram.UpdateHandler, lg *zap.Logger, t *app.Telemetry) (*telegram.Client, error) {
 	if err := os.MkdirAll(cfg.SessionDir, 0o700); err != nil {
-		return nil, nil, errors.Wrap(err, "create session dir")
+		return nil, errors.Wrap(err, "create session dir")
 	}
 
 	middlewares := []telegram.Middleware{invokeLogger(lg)}
@@ -81,22 +74,22 @@ func newClient(cfg Config, handler telegram.UpdateHandler, lg *zap.Logger, t *ap
 	if t != nil {
 		otelMW, err := oteltg.New(t.MeterProvider(), t.TracerProvider())
 		if err != nil {
-			return nil, nil, errors.Wrap(err, "otel middleware")
+			return nil, errors.Wrap(err, "otel middleware")
 		}
 		middlewares = append(middlewares, otelMW)
 
 		m, err := newTGMetrics(t.MeterProvider().Meter(instrumentName))
 		if err != nil {
-			return nil, nil, errors.Wrap(err, "init Telegram metrics")
+			return nil, errors.Wrap(err, "init Telegram metrics")
 		}
 		metrics = &m
 	}
 
-	waiter := floodwait.NewWaiter().WithCallback(func(ctx context.Context, wait floodwait.FloodWait) {
+	waiter := newFloodWaiter().withCallback(func(ctx context.Context, wait time.Duration) {
 		if metrics != nil {
 			metrics.FloodWaits.Add(ctx, 1)
 		}
-		lg.Warn("Flood wait", zap.Duration("wait", wait.Duration))
+		lg.Warn("Flood wait", zap.Duration("wait", wait))
 	})
 	middlewares = append(middlewares,
 		waiter,
@@ -112,7 +105,7 @@ func newClient(cfg Config, handler telegram.UpdateHandler, lg *zap.Logger, t *ap
 		Middlewares:   middlewares,
 	})
 
-	return client, waiter, nil
+	return client, nil
 }
 
 // invokeLogger is a Telegram middleware that logs every MTProto RPC call at

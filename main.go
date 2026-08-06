@@ -196,7 +196,7 @@ func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry)
 		Logger: logzap.New(lg.Named("updates")),
 	})
 
-	client, waiter, err := newClient(cfg, mgr, lg, t)
+	client, err := newClient(cfg, mgr, lg, t)
 	if err != nil {
 		return err
 	}
@@ -206,106 +206,104 @@ func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry)
 		return err
 	}
 
-	return waiter.Run(ctx, func(ctx context.Context) error {
-		return client.Run(ctx, func(ctx context.Context) error {
-			status, err := client.Auth().Status(ctx)
-			if err != nil {
-				return errors.Wrap(err, "auth status")
+	return client.Run(ctx, func(ctx context.Context) error {
+		status, err := client.Auth().Status(ctx)
+		if err != nil {
+			return errors.Wrap(err, "auth status")
+		}
+		if !status.Authorized {
+			return errors.New("not authorized: run `tgmcp auth` first to create a session")
+		}
+
+		self, err := client.Self(ctx)
+		if err != nil {
+			return errors.Wrap(err, "self")
+		}
+
+		// Publish the API for the OnChannelTooLong callback. Set before the
+		// updates manager starts, so it is visible by the time updates flow.
+		api = client.API()
+
+		srv := &server{
+			api:              client.API(),
+			cache:            cache,
+			msgs:             msgs,
+			lg:               lg,
+			fileRootVal:      cfg.FileRoot,
+			allowSend:        cfg.AllowSend,
+			allowProfileEdit: cfg.AllowProfileEdit,
+			allowInlineMedia: cfg.AllowInlineMedia,
+			attribution:      cfg.Attribution,
+			strict:           cfg.Strict,
+			footer:           cfg.AgentFooter,
+			botToken:         cfg.BotToken,
+			botUsername:      cfg.BotUsername,
+			sessionDir:       cfg.SessionDir,
+			spool:            newInlineSpool(cfg.SessionDir),
+			selfID:           self.ID,
+		}
+		m := mcp.NewServer(&mcp.Implementation{
+			Name:    "tgmcp",
+			Version: "0.1.0",
+		}, nil)
+		srv.register(m)
+		m.AddReceivingMiddleware(instrument.Middleware())
+
+		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+			return m
+		}, nil)
+		httpSrv := &http.Server{
+			Addr:              cfg.HTTPAddr,
+			Handler:           instrumentHTTP(lg, t, handler),
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+
+		go func() {
+			<-ctx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+				lg.Error("Shutdown MCP HTTP server", zap.Error(err))
 			}
-			if !status.Authorized {
-				return errors.New("not authorized: run `tgmcp auth` first to create a session")
-			}
+		}()
 
-			self, err := client.Self(ctx)
-			if err != nil {
-				return errors.Wrap(err, "self")
-			}
+		g, ctx := errgroup.WithContext(ctx)
 
-			// Publish the API for the OnChannelTooLong callback. Set before the
-			// updates manager starts, so it is visible by the time updates flow.
-			api = client.API()
-
-			srv := &server{
-				api:              client.API(),
-				cache:            cache,
-				msgs:             msgs,
-				lg:               lg,
-				fileRootVal:      cfg.FileRoot,
-				allowSend:        cfg.AllowSend,
-				allowProfileEdit: cfg.AllowProfileEdit,
-				allowInlineMedia: cfg.AllowInlineMedia,
-				attribution:      cfg.Attribution,
-				strict:           cfg.Strict,
-				footer:           cfg.AgentFooter,
-				botToken:         cfg.BotToken,
-				botUsername:      cfg.BotUsername,
-				sessionDir:       cfg.SessionDir,
-				spool:            newInlineSpool(cfg.SessionDir),
-				selfID:           self.ID,
-			}
-			m := mcp.NewServer(&mcp.Implementation{
-				Name:    "tgmcp",
-				Version: "0.1.0",
-			}, nil)
-			srv.register(m)
-			m.AddReceivingMiddleware(instrument.Middleware())
-
-			handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
-				return m
-			}, nil)
-			httpSrv := &http.Server{
-				Addr:              cfg.HTTPAddr,
-				Handler:           instrumentHTTP(lg, t, handler),
-				ReadHeaderTimeout: 10 * time.Second,
-			}
-
-			go func() {
-				<-ctx.Done()
-				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				if err := httpSrv.Shutdown(shutdownCtx); err != nil {
-					lg.Error("Shutdown MCP HTTP server", zap.Error(err))
-				}
-			}()
-
-			g, ctx := errgroup.WithContext(ctx)
-
-			// Run the updates manager: it loads the persisted state, seeds the
-			// dialog cache once via OnStart, then keeps it live, recovering gaps
-			// with getDifference.
-			g.Go(func() error {
-				return mgr.Run(ctx, client.API(), self.ID, updates.AuthOptions{
-					OnStart: func(ctx context.Context) {
-						// Seed the cache from persistent storage. Only fetch the
-						// full dialog list when nothing is persisted (first run);
-						// on later starts the updates manager reconciles the
-						// persisted cache via getDifference.
-						n, err := cache.loadFromStore()
-						if err != nil {
-							lg.Error("Load persisted dialogs", zap.Error(err))
+		// Run the updates manager: it loads the persisted state, seeds the
+		// dialog cache once via OnStart, then keeps it live, recovering gaps
+		// with getDifference.
+		g.Go(func() error {
+			return mgr.Run(ctx, client.API(), self.ID, updates.AuthOptions{
+				OnStart: func(ctx context.Context) {
+					// Seed the cache from persistent storage. Only fetch the
+					// full dialog list when nothing is persisted (first run);
+					// on later starts the updates manager reconciles the
+					// persisted cache via getDifference.
+					n, err := cache.loadFromStore()
+					if err != nil {
+						lg.Error("Load persisted dialogs", zap.Error(err))
+					}
+					if n == 0 {
+						if err := bootstrapDialogs(ctx, client.API(), cache); err != nil {
+							lg.Error("Bootstrap dialogs", zap.Error(err))
+							return
 						}
-						if n == 0 {
-							if err := bootstrapDialogs(ctx, client.API(), cache); err != nil {
-								lg.Error("Bootstrap dialogs", zap.Error(err))
-								return
-							}
-						} else {
-							lg.Info("Loaded persisted dialogs", zap.Int("count", n))
-						}
-						lg.Info("Authorized, serving MCP over HTTP", zap.String("addr", cfg.HTTPAddr))
-					},
-				})
+					} else {
+						lg.Info("Loaded persisted dialogs", zap.Int("count", n))
+					}
+					lg.Info("Authorized, serving MCP over HTTP", zap.String("addr", cfg.HTTPAddr))
+				},
 			})
-
-			g.Go(func() error {
-				if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-					return errors.Wrap(err, "http serve")
-				}
-
-				return nil
-			})
-
-			return g.Wait()
 		})
+
+		g.Go(func() error {
+			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				return errors.Wrap(err, "http serve")
+			}
+
+			return nil
+		})
+
+		return g.Wait()
 	})
 }

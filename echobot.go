@@ -126,7 +126,7 @@ func runEchoBot(ctx context.Context, cfg Config, lg *zap.Logger) error {
 	botCfg.SessionDir = filepath.Join(cfg.SessionDir, echoBotSessionDir)
 
 	dispatcher := tg.NewUpdateDispatcher()
-	client, waiter, err := newClient(botCfg, dispatcher, lg, nil)
+	client, err := newClient(botCfg, dispatcher, lg, nil)
 	if err != nil {
 		return err
 	}
@@ -153,45 +153,43 @@ func runEchoBot(ctx context.Context, cfg Config, lg *zap.Logger) error {
 		return nil
 	})
 
-	return waiter.Run(ctx, func(ctx context.Context) error {
-		return client.Run(ctx, func(ctx context.Context) error {
-			status, err := client.Auth().Status(ctx)
-			if err != nil {
-				return errors.Wrap(err, "auth status")
+	return client.Run(ctx, func(ctx context.Context) error {
+		status, err := client.Auth().Status(ctx)
+		if err != nil {
+			return errors.Wrap(err, "auth status")
+		}
+		if !status.Authorized {
+			if _, err := client.Auth().Bot(ctx, cfg.BotToken); err != nil {
+				return errors.Wrap(err, "bot auth")
 			}
-			if !status.Authorized {
-				if _, err := client.Auth().Bot(ctx, cfg.BotToken); err != nil {
-					return errors.Wrap(err, "bot auth")
-				}
-			}
+		}
 
-			self, err := client.Self(ctx)
-			if err != nil {
-				return errors.Wrap(err, "self")
-			}
-			// Catches a session left behind by a different bot: the stored
-			// session wins over the token, so the ID would silently disagree.
-			if id, err := botIDFromToken(cfg.BotToken); err == nil && id != self.ID {
-				return errors.Errorf("session belongs to bot %d but TG_BOT_TOKEN is for %d, remove %s to re-authenticate",
-					self.ID, id, botCfg.SessionDir)
-			}
+		self, err := client.Self(ctx)
+		if err != nil {
+			return errors.Wrap(err, "self")
+		}
+		// Catches a session left behind by a different bot: the stored
+		// session wins over the token, so the ID would silently disagree.
+		if id, err := botIDFromToken(cfg.BotToken); err == nil && id != self.ID {
+			return errors.Errorf("session belongs to bot %d but TG_BOT_TOKEN is for %d, remove %s to re-authenticate",
+				self.ID, id, botCfg.SessionDir)
+		}
 
-			if err := publishEchoBotIdentity(cfg.SessionDir, echoBotIdentity{
-				ID:       self.ID,
-				Username: self.Username,
-			}); err != nil {
-				return err
-			}
+		if err := publishEchoBotIdentity(cfg.SessionDir, echoBotIdentity{
+			ID:       self.ID,
+			Username: self.Username,
+		}); err != nil {
+			return err
+		}
 
-			lg.Info("Echo bot ready",
-				zap.String("username", self.Username),
-				zap.Int64("id", self.ID),
-			)
+		lg.Info("Echo bot ready",
+			zap.String("username", self.Username),
+			zap.Int64("id", self.ID),
+		)
 
-			<-ctx.Done()
+		<-ctx.Done()
 
-			return ctx.Err()
-		})
+		return ctx.Err()
 	})
 }
 
