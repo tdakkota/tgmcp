@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/go-faster/errors"
 )
 
 func TestInlineSpoolRoundTrip(t *testing.T) {
@@ -117,6 +119,30 @@ func TestInlineSpoolDrop(t *testing.T) {
 	s.drop(key)
 
 	if _, err := s.read(key); err == nil {
-		t.Fatal("take after drop: want error, got nil")
+		t.Fatal("read after drop: want error, got nil")
+	}
+}
+
+// TestInlineSpoolReadNotOurQuery checks that queries which are not spool keys
+// are distinguishable from real failures, so the bot can answer them quietly
+// instead of logging a fault for anyone who opens it and types.
+func TestInlineSpoolReadNotOurQuery(t *testing.T) {
+	s := newInlineSpool(t.TempDir())
+
+	for _, tt := range []struct {
+		name string
+		key  string
+	}{
+		{name: "empty", key: ""},
+		{name: "free text", key: "hello there"},
+		{name: "traversal", key: "../../etc/passwd"},
+		{name: "well formed but unknown", key: "aabbccddeeff001122334455"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := s.read(tt.key)
+			if !errors.Is(err, errNotOurQuery) {
+				t.Errorf("read(%q) = %v, want errNotOurQuery", tt.key, err)
+			}
+		})
 	}
 }

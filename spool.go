@@ -68,6 +68,11 @@ func (s *inlineSpool) put(p inlinePayload) (string, error) {
 	return key, nil
 }
 
+// errNotOurQuery marks an inline query that does not stand for a spooled
+// payload. Anyone can open the bot and type into it, so this is an ordinary
+// event rather than a failure.
+var errNotOurQuery = errors.New("inline query is not a spool key")
+
 // read returns the payload for key without consuming it.
 //
 // Reading and dropping are separate so that the caller can authorize the
@@ -80,6 +85,9 @@ func (s *inlineSpool) read(key string) (inlinePayload, error) {
 	}
 
 	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return inlinePayload{}, errors.Wrapf(errNotOurQuery, "no payload for key %q", key)
+	}
 	if err != nil {
 		return inlinePayload{}, errors.Wrap(err, "read payload")
 	}
@@ -109,7 +117,7 @@ func (s *inlineSpool) path(key string) string {
 func (s *inlineSpool) validPath(key string) (string, error) {
 	raw, err := hex.DecodeString(key)
 	if err != nil || len(raw) != spoolKeyLen {
-		return "", errors.Errorf("malformed spool key %q", key)
+		return "", errors.Wrapf(errNotOurQuery, "malformed spool key %q", key)
 	}
 
 	return s.path(key), nil

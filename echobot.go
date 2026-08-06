@@ -23,6 +23,21 @@ const echoBotSessionDir = "bot"
 // message.
 const inlineCacheTime = 0
 
+// answerNothing returns an empty result set, which clients render as "no
+// results" instead of waiting for an answer that never comes.
+func answerNothing(ctx context.Context, api *tg.Client, queryID int64) error {
+	if _, err := api.MessagesSetInlineBotResults(ctx, &tg.MessagesSetInlineBotResultsRequest{
+		Private:   true,
+		QueryID:   queryID,
+		CacheTime: inlineCacheTime,
+		Results:   []tg.InputBotInlineResultClass{},
+	}); err != nil {
+		return errors.Wrap(err, "answer with no results")
+	}
+
+	return nil
+}
+
 // inlineQueryAllowed reports whether user may claim a payload spooled by
 // owner.
 //
@@ -118,9 +133,17 @@ func runEchoBot(ctx context.Context, cfg Config, lg *zap.Logger) error {
 
 	api := client.API()
 	dispatcher.OnBotInlineQuery(func(ctx context.Context, _ tg.Entities, u *tg.UpdateBotInlineQuery) error {
-		if err := answerInlineQuery(ctx, api, spool, allowed, u); err != nil {
-			// Answering is best effort: a failure here must not stop the bot,
-			// and the caller falls back to footer attribution.
+		// Answering is best effort: a failure here must not stop the bot, and
+		// the sender falls back to footer attribution.
+		switch err := answerInlineQuery(ctx, api, spool, allowed, u); {
+		case err == nil:
+		case errors.Is(err, errNotOurQuery):
+			// Anyone can open the bot and type into it. Expected, not a fault.
+			lg.Debug("Ignored inline query",
+				zap.Int64("query_id", u.QueryID),
+				zap.Error(err),
+			)
+		default:
 			lg.Warn("Answer inline query",
 				zap.Int64("query_id", u.QueryID),
 				zap.Error(err),
@@ -186,12 +209,22 @@ func answerInlineQuery(
 ) error {
 	payload, err := spool.read(u.Query)
 	if err != nil {
+		// Still answer, or the querying client shows a spinner until it times
+		// out. An empty result set is also what a stranger should see.
+		if aerr := answerNothing(ctx, api, u.QueryID); aerr != nil {
+			return aerr
+		}
+
 		return err
 	}
 
 	// Authorize before consuming: otherwise anyone holding a key could destroy
 	// a pending message without being able to send it.
 	if !inlineQueryAllowed(allowed, payload.Owner, u.UserID) {
+		if aerr := answerNothing(ctx, api, u.QueryID); aerr != nil {
+			return aerr
+		}
+
 		return errors.Errorf("user %d may not claim inline payloads", u.UserID)
 	}
 	spool.drop(u.Query)
