@@ -68,6 +68,33 @@ func rootCmd() *cobra.Command {
 			},
 		},
 		&cobra.Command{
+			Use:   "echobot",
+			Short: "Run only the inline echo bot used for agent attribution",
+			Args:  cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				cfg, err := LoadConfig()
+				if err != nil {
+					return err
+				}
+
+				logCfg, err := zapConfig(cfg)
+				if err != nil {
+					return err
+				}
+
+				app.Run(func(ctx context.Context, lg *zap.Logger, _ *app.Telemetry) error {
+					return runEchoBot(ctx, cfg, lg)
+				},
+					app.WithContext(cmd.Context()),
+					app.WithServiceName("tgmcp-echobot"),
+					app.WithModulePath(modulePath),
+					app.WithZapConfig(logCfg),
+				)
+
+				return nil
+			},
+		},
+		&cobra.Command{
 			Use:   "serve",
 			Short: "Run the MCP server over HTTP",
 			Args:  cobra.NoArgs,
@@ -206,6 +233,13 @@ func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry)
 				allowSend:        cfg.AllowSend,
 				allowProfileEdit: cfg.AllowProfileEdit,
 				allowInlineMedia: cfg.AllowInlineMedia,
+				attribution:      cfg.Attribution,
+				strict:           cfg.Strict,
+				footer:           cfg.AgentFooter,
+				botToken:         cfg.BotToken,
+				botUsername:      cfg.BotUsername,
+				sessionDir:       cfg.SessionDir,
+				spool:            newInlineSpool(cfg.SessionDir),
 			}
 			m := mcp.NewServer(&mcp.Implementation{
 				Name:    "tgmcp",

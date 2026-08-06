@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/go-faster/errors"
 	"github.com/joho/godotenv"
@@ -21,6 +22,12 @@ type Config struct {
 	AllowSend        bool
 	AllowProfileEdit bool
 	AllowInlineMedia bool
+
+	Attribution attributionMode
+	Strict      bool
+	AgentFooter string
+	BotToken    string
+	BotUsername string
 }
 
 // LoadConfig reads configuration from the environment, optionally sourcing a
@@ -37,6 +44,14 @@ type Config struct {
 //	MCP_ADDR         - address for the MCP HTTP server to listen on (default: "127.0.0.1:8080")
 //	LOG_LEVEL        - log level: debug, info, warn, error (default: "info")
 //	TG_FILE_ROOT     - directory from which send_file may read files (default: disabled)
+//
+// Agent attribution, see [attributionMode]:
+//
+//	TG_ATTRIBUTION        - off (default), footer, or bot
+//	TG_ATTRIBUTION_STRICT - "true" fails the send when bot attribution is unavailable
+//	TG_AGENT_FOOTER       - footer text (default: "sent by an agent")
+//	TG_BOT_TOKEN          - echo bot token, required by "tgmcp echobot"
+//	TG_BOT_USERNAME       - echo bot @username; read from echobot.json when unset
 //
 // Telemetry is configured by the standard OTEL_* variables read by
 // [github.com/go-faster/sdk/app], see README.
@@ -87,6 +102,25 @@ func LoadConfig() (Config, error) {
 	cfg.AllowSend = os.Getenv("TG_ALLOW_SEND") == "true"
 	cfg.AllowProfileEdit = os.Getenv("TG_ALLOW_PROFILE_EDIT") == "true"
 	cfg.AllowInlineMedia = os.Getenv("TG_ALLOW_INLINE_MEDIA") == "true"
+
+	mode, err := parseAttributionMode(os.Getenv("TG_ATTRIBUTION"))
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Attribution = mode
+	cfg.Strict = os.Getenv("TG_ATTRIBUTION_STRICT") == "true"
+
+	cfg.AgentFooter = os.Getenv("TG_AGENT_FOOTER")
+	if cfg.AgentFooter == "" {
+		cfg.AgentFooter = defaultAgentFooter
+	}
+
+	cfg.BotToken = os.Getenv("TG_BOT_TOKEN")
+	cfg.BotUsername = strings.TrimPrefix(os.Getenv("TG_BOT_USERNAME"), "@")
+
+	if cfg.Attribution == attributionBot && cfg.BotToken == "" && cfg.BotUsername == "" {
+		return Config{}, errors.New("TG_ATTRIBUTION=bot requires TG_BOT_TOKEN or TG_BOT_USERNAME")
+	}
 
 	return cfg, nil
 }

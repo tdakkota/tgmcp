@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/go-faster/errors"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -27,6 +28,18 @@ type server struct {
 	allowSend        bool
 	allowProfileEdit bool
 	allowInlineMedia bool
+
+	// Agent attribution, see [attributionMode].
+	attribution attributionMode
+	strict      bool
+	footer      string
+	botToken    string
+	botUsername string
+	sessionDir  string
+	spool       *inlineSpool
+
+	botMu sync.Mutex
+	bot   tg.InputUserClass
 }
 
 // listChannelsInput has no parameters.
@@ -141,8 +154,9 @@ type sendMessageInput struct {
 }
 
 type sendMessageOutput struct {
-	OK        bool `json:"ok" jsonschema:"true on success"`
-	MessageID int  `json:"message_id,omitempty" jsonschema:"sent message id if known"`
+	OK          bool   `json:"ok" jsonschema:"true on success"`
+	MessageID   int    `json:"message_id,omitempty" jsonschema:"sent message id if known"`
+	Attribution string `json:"attribution" jsonschema:"how the message was marked as agent-sent: off, footer or bot"`
 }
 
 type sendFileInput struct {
@@ -156,8 +170,9 @@ type sendFileInput struct {
 }
 
 type sendFileOutput struct {
-	OK        bool `json:"ok" jsonschema:"true on success"`
-	MessageID int  `json:"message_id,omitempty" jsonschema:"sent message id if known"`
+	OK          bool   `json:"ok" jsonschema:"true on success"`
+	MessageID   int    `json:"message_id,omitempty" jsonschema:"sent message id if known"`
+	Attribution string `json:"attribution" jsonschema:"how the caption was marked as agent-sent: off or footer"`
 }
 
 type sendReactionInput struct {
@@ -528,26 +543,16 @@ func (s *server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, 
 	if err != nil {
 		return nil, sendMessageOutput{}, err
 	}
-	b := message.NewSender(s.api).To(p)
-	if in.Silent {
-		b.Silent()
-	}
-	if in.NoWebpage {
-		b.NoWebpage()
-	}
-	if in.ReplyToMessageID > 0 {
-		b.Reply(in.ReplyToMessageID)
-	}
-	text, err := s.styledText(in.Text, in.ParseMode)
-	if err != nil {
-		return nil, sendMessageOutput{}, err
-	}
-	upd, err := b.StyledText(ctx, text)
+	upd, attribution, err := s.sendText(ctx, p, in)
 	if err != nil {
 		return nil, sendMessageOutput{}, errors.Wrap(err, "send")
 	}
 	id := extractSentMessageID(upd)
-	return nil, sendMessageOutput{OK: true, MessageID: id}, nil
+	return nil, sendMessageOutput{
+		OK:          true,
+		MessageID:   id,
+		Attribution: string(attribution),
+	}, nil
 }
 
 func (s *server) handleSendFile(ctx context.Context, _ *mcp.CallToolRequest, in sendFileInput) (*mcp.CallToolResult, sendFileOutput, error) {
@@ -573,21 +578,25 @@ func (s *server) handleSendFile(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if in.ReplyToMessageID > 0 {
 		b.Reply(in.ReplyToMessageID)
 	}
-	caption, err := s.styledText(in.Caption, in.ParseMode)
+	caption, attribution, err := s.styledCaption(in.Caption, in.ParseMode)
 	if err != nil {
 		return nil, sendFileOutput{}, err
 	}
 	var upd tg.UpdatesClass
 	if in.AsPhoto {
-		upd, err = b.Upload(message.FromPath(abs)).Photo(ctx, caption)
+		upd, err = b.Upload(message.FromPath(abs)).Photo(ctx, caption...)
 	} else {
-		upd, err = b.Upload(message.FromPath(abs)).File(ctx, caption)
+		upd, err = b.Upload(message.FromPath(abs)).File(ctx, caption...)
 	}
 	if err != nil {
 		return nil, sendFileOutput{}, errors.Wrap(err, "send file")
 	}
 	id := extractSentMessageID(upd)
-	return nil, sendFileOutput{OK: true, MessageID: id}, nil
+	return nil, sendFileOutput{
+		OK:          true,
+		MessageID:   id,
+		Attribution: string(attribution),
+	}, nil
 }
 
 func (s *server) handleSendReaction(ctx context.Context, _ *mcp.CallToolRequest, in sendReactionInput) (*mcp.CallToolResult, sendReactionOutput, error) {

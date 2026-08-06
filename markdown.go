@@ -23,11 +23,20 @@ const (
 // custom emoji become Telegram entities. Headings, lists and tables have no
 // entity equivalent and are kept as plain text, markers included.
 func (s *server) styledText(text, mode string) (styling.StyledTextOption, error) {
+	return styledText(text, mode, s.resolveUser)
+}
+
+// styledText is [server.styledText] without a server, for the echo bot, which
+// renders the same payload in a separate process.
+//
+// resolver may be nil, in which case mentions are built from the user ID
+// alone. That is enough for a bot session but not for a user one.
+func styledText(text, mode string, resolver func(id int64) (tg.InputUserClass, error)) (styling.StyledTextOption, error) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "", parseModePlain:
 		return styling.Plain(text), nil
 	case parseModeMarkdown:
-		return markdown.String(s.resolveUser, text), nil
+		return markdown.String(resolver, text), nil
 	default:
 		return styling.StyledTextOption{}, errors.Errorf("unknown parse_mode %q, want %q or %q",
 			mode, parseModePlain, parseModeMarkdown)

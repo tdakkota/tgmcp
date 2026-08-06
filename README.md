@@ -81,6 +81,11 @@ tool call. Instead, mirroring [tdlib](https://github.com/tdlib/td)'s strategy:
 | `TG_ALLOW_SEND` | no | off | Grants `send_message`, `send_file`, `send_reaction`, `send_chat_action`, `send_screenshot_notification`. |
 | `TG_ALLOW_PROFILE_EDIT` | no | off | Grants `update_profile`, `update_profile_photo`. |
 | `TG_ALLOW_INLINE_MEDIA` | no | off | Lets `get_file` return image bytes in the tool result (`inline: true`) instead of writing to disk. |
+| `TG_ATTRIBUTION` | no | `off` | How to mark messages as agent-sent: `off`, `footer` or `bot`. See [Agent attribution](#agent-attribution). |
+| `TG_ATTRIBUTION_STRICT` | no | off | `true` fails the send when `bot` attribution is unavailable instead of degrading to the footer. |
+| `TG_AGENT_FOOTER` | no | `sent by an agent` | Footer text appended in `footer` mode. |
+| `TG_BOT_TOKEN` | no | — | Echo bot token, required by `tgmcp echobot`. |
+| `TG_BOT_USERNAME` | no | — | Echo bot `@username`. Read from the identity the running bot publishes when unset. |
 
 Every right is **opt-in** and granted only by the literal string `true`:
 anything else, including `1` and `TRUE`, leaves it off. Without any of them the
@@ -107,6 +112,49 @@ broken mention.
 
 The default stays `plain` on purpose: flipping it would silently reformat
 messages containing `_` or `*`, which is common in log lines and identifiers.
+
+### Agent attribution
+
+Messages sent by tgmcp come from your own account, so nothing distinguishes
+them from messages you typed. `TG_ATTRIBUTION` picks how they are marked:
+
+| Value | Behaviour |
+| --- | --- |
+| `off` (default) | No marker. Messages are indistinguishable from your own. |
+| `footer` | Appends `TG_AGENT_FOOTER` as an italic line after the message. |
+| `bot` | Routes the message through an inline echo bot, so Telegram renders a **via @bot** header on it. |
+
+`bot` mode needs a second process:
+
+```sh
+tgmcp echobot   # alongside `tgmcp serve`
+```
+
+Set `TG_BOT_TOKEN` to a bot from [@BotFather][botfather] and enable inline mode
+for it (`/setinline`) — without that, every inline query is rejected and
+attribution never reaches `bot`. The bot stores its session under
+`<TG_SESSION_DIR>/bot/` and publishes its username to
+`<TG_SESSION_DIR>/echobot.json` on startup, which is how `serve` addresses it.
+Set `TG_BOT_USERNAME` to skip that lookup; the token alone is not enough, since
+a bot that is not already a dialog cannot be resolved by numeric ID.
+
+[botfather]: https://t.me/BotFather
+
+Telegram caps an inline query at 256 characters, well below a typical message,
+so the query carries only a single-use key and the text travels through a spool
+directory at `<TG_SESSION_DIR>/inline/`. Both processes must therefore run on
+the same host and share that directory. Entries expire after 5 minutes.
+
+If the echo bot is down, or the chat forbids inline bots,
+`TG_ATTRIBUTION_STRICT=true` fails the send, while the default degrades to the
+footer. `send_message` and `send_file` return the attribution actually applied
+in their `attribution` field, so the calling agent can tell what happened.
+
+Uploads always use the footer: an inline result cannot carry a local file.
+
+Note this marks messages by convention, not by proof. tgmcp decides whether to
+apply attribution, so it is a courtesy to readers, not something that survives
+an agent that chooses to send unmarked.
 
 ### Telemetry
 
