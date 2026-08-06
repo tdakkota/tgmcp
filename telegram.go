@@ -652,7 +652,7 @@ func (s *server) resolvePeer(ctx context.Context, target string) (tg.InputPeerCl
 
 	// Fallback to gotd peer resolver (supports @user, t.me, phone, domain).
 	r := peer.DefaultResolver(s.api)
-	p, err := peer.Resolve(r, target)(ctx)
+	p, err := peer.Resolve(target).Bind(r)(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(err, "resolve %q", target)
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/gotd/contrib/middleware/floodwait"
 	"github.com/gotd/contrib/middleware/ratelimit"
 	"github.com/gotd/contrib/oteltg"
+	"github.com/gotd/log/logzap"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/time/rate"
@@ -103,7 +104,7 @@ func newClient(cfg Config, handler telegram.UpdateHandler, lg *zap.Logger, t *ap
 	)
 
 	client := telegram.NewClient(cfg.AppID, cfg.AppHash, telegram.Options{
-		Logger: lg,
+		Logger: logzap.New(lg),
 		SessionStorage: &telegram.FileSessionStorage{
 			Path: filepath.Join(cfg.SessionDir, "session.json"),
 		},

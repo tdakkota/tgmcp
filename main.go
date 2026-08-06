@@ -19,6 +19,7 @@ import (
 	"github.com/go-faster/errors"
 	"github.com/go-faster/sdk/app"
 	"github.com/gotd/contrib/bbolt"
+	"github.com/gotd/log/logzap"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -192,7 +193,7 @@ func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry)
 				lg.Info("Re-bootstrapped dialogs after difference too long")
 			}()
 		},
-		Logger: lg.Named("updates"),
+		Logger: logzap.New(lg.Named("updates")),
 	})
 
 	client, waiter, err := newClient(cfg, mgr, lg, t)
