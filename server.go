@@ -322,6 +322,26 @@ func (s *server) register(m *mcp.Server) {
 			Name:        "send_screenshot_notification",
 			Description: "Notify a chat that a screenshot was taken. Posts a visible service message.",
 		}, s.handleSendScreenshotNotification)
+
+		mcp.AddTool(m, &mcp.Tool{
+			Name:        "send_poll",
+			Description: "Send a poll or quiz to a chat. Needs at least 2 options; quizzes need correct_option.",
+		}, s.handleSendPoll)
+
+		mcp.AddTool(m, &mcp.Tool{
+			Name:        "vote_poll",
+			Description: "Vote in a poll by option index. Empty options retracts the vote. Returns the updated tally.",
+		}, s.handleVotePoll)
+
+		mcp.AddTool(m, &mcp.Tool{
+			Name:        "list_inline_results",
+			Description: "Ask an inline bot what it offers for a query, without sending anything. The query is delivered to the bot's operator.",
+		}, s.handleListInlineResults)
+
+		mcp.AddTool(m, &mcp.Tool{
+			Name:        "send_inline_result",
+			Description: "Send a result from an inline bot, which marks the message 'via @bot'. Defaults to the first result.",
+		}, s.handleSendInlineResult)
 	}
 
 	if s.allowProfileEdit {

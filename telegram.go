@@ -58,8 +58,9 @@ type Message struct {
 	Out       bool   `json:"out,omitempty" jsonschema:"true if outgoing"`
 	ReplyToID int    `json:"reply_to_id,omitempty" jsonschema:"ID of message being replied to"`
 	HasMedia  bool   `json:"has_media,omitempty" jsonschema:"true if the message has downloadable media (see get_file)"`
-	MediaType string `json:"media_type,omitempty" jsonschema:"media kind: photo or document"`
+	MediaType string `json:"media_type,omitempty" jsonschema:"media kind: photo, document or poll"`
 	FileName  string `json:"file_name,omitempty" jsonschema:"file name of the attached document, if any"`
+	Poll      *Poll  `json:"poll,omitempty" jsonschema:"poll contents and tally, when media_type is poll"`
 	Service   bool   `json:"service,omitempty" jsonschema:"true for service messages, which carry an action instead of text"`
 	Action    string `json:"action,omitempty" jsonschema:"service action, e.g. screenshot_taken, pin_message, chat_add_user"`
 }
@@ -348,6 +349,11 @@ func messageFromTG(msg *tg.Message, ent entities) Message {
 				m.MediaType = "document"
 				m.FileName = documentFileName(doc)
 			}
+		case *tg.MessageMediaPoll:
+			// Not downloadable, so HasMedia stays false: the poll is returned
+			// inline instead of through get_file.
+			m.MediaType = "poll"
+			m.Poll = pollFromMedia(mm)
 		}
 	}
 	return m
