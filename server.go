@@ -37,6 +37,9 @@ type server struct {
 	botUsername string
 	sessionDir  string
 	spool       *inlineSpool
+	// selfID is the signed-in account, stamped on spooled payloads so that
+	// only it can claim them.
+	selfID int64
 
 	botMu sync.Mutex
 	bot   tg.InputUserClass

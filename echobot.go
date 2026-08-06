@@ -23,6 +23,21 @@ const echoBotSessionDir = "bot"
 // message.
 const inlineCacheTime = 0
 
+// inlineQueryAllowed reports whether user may claim a payload spooled by
+// owner.
+//
+// The owner is always allowed: an inline query is issued by the same account
+// that spooled the payload, so the default needs no access list. Entries in
+// allowed extend that to other accounts, for setups where a second account
+// drives the same echo bot.
+func inlineQueryAllowed(allowed map[int64]bool, owner, user int64) bool {
+	if owner != 0 && user == owner {
+		return true
+	}
+
+	return allowed[user]
+}
+
 // echoBotIdentityFile is where the echo bot publishes who it is, so that the
 // MCP server can address it without being told its username separately.
 const echoBotIdentityFile = "echobot.json"
@@ -85,6 +100,11 @@ func runEchoBot(ctx context.Context, cfg Config, lg *zap.Logger) error {
 
 	spool := newInlineSpool(cfg.SessionDir)
 
+	allowed := make(map[int64]bool, len(cfg.BotAllowedUsers))
+	for _, id := range cfg.BotAllowedUsers {
+		allowed[id] = true
+	}
+
 	// The bot needs a session of its own: the user session in the parent
 	// directory belongs to a different account.
 	botCfg := cfg
@@ -98,7 +118,7 @@ func runEchoBot(ctx context.Context, cfg Config, lg *zap.Logger) error {
 
 	api := client.API()
 	dispatcher.OnBotInlineQuery(func(ctx context.Context, _ tg.Entities, u *tg.UpdateBotInlineQuery) error {
-		if err := answerInlineQuery(ctx, api, spool, u); err != nil {
+		if err := answerInlineQuery(ctx, api, spool, allowed, u); err != nil {
 			// Answering is best effort: a failure here must not stop the bot,
 			// and the caller falls back to footer attribution.
 			lg.Warn("Answer inline query",
@@ -154,11 +174,27 @@ func runEchoBot(ctx context.Context, cfg Config, lg *zap.Logger) error {
 
 // answerInlineQuery resolves the query key and returns a single result holding
 // the spooled message.
-func answerInlineQuery(ctx context.Context, api *tg.Client, spool *inlineSpool, u *tg.UpdateBotInlineQuery) error {
-	payload, err := spool.take(u.Query)
+//
+// allowed is the configured access list. The account that spooled the payload
+// is always permitted, so the common case needs no configuration.
+func answerInlineQuery(
+	ctx context.Context,
+	api *tg.Client,
+	spool *inlineSpool,
+	allowed map[int64]bool,
+	u *tg.UpdateBotInlineQuery,
+) error {
+	payload, err := spool.read(u.Query)
 	if err != nil {
 		return err
 	}
+
+	// Authorize before consuming: otherwise anyone holding a key could destroy
+	// a pending message without being able to send it.
+	if !inlineQueryAllowed(allowed, payload.Owner, u.UserID) {
+		return errors.Errorf("user %d may not claim inline payloads", u.UserID)
+	}
+	spool.drop(u.Query)
 
 	opt, err := styledText(payload.Text, payload.ParseMode, nil)
 	if err != nil {

@@ -86,6 +86,7 @@ tool call. Instead, mirroring [tdlib](https://github.com/tdlib/td)'s strategy:
 | `TG_AGENT_FOOTER` | no | `sent by an agent` | Footer text appended in `footer` mode. |
 | `TG_BOT_TOKEN` | no | — | Echo bot token, required by `tgmcp echobot`. |
 | `TG_BOT_USERNAME` | no | — | Echo bot `@username`. Read from the identity the running bot publishes when unset. |
+| `TG_BOT_ALLOWED_USERS` | no | — | Extra user IDs allowed to claim inline payloads, comma-separated. The spooling account is always allowed. |
 
 Every right is **opt-in** and granted only by the literal string `true`:
 anything else, including `1` and `TRUE`, leaves it off. Without any of them the
@@ -139,6 +140,14 @@ Set `TG_BOT_USERNAME` to skip that lookup; the token alone is not enough, since
 a bot that is not already a dialog cannot be resolved by numeric ID.
 
 [botfather]: https://t.me/BotFather
+
+The bot only answers the account that spooled the payload, which it records
+alongside the text, so a leaked key is useless to anyone else and no access
+list is needed for the usual single-account setup. `TG_BOT_ALLOWED_USERS`
+extends that to further user IDs, comma-separated, for setups where a second
+account drives the same bot. Payloads are read but not consumed until the
+requester is authorised, so an unauthorised query cannot destroy a pending
+message.
 
 Telegram caps an inline query at 256 characters, well below a typical message,
 so the query carries only a single-use key and the text travels through a spool

@@ -125,7 +125,11 @@ func (s *server) sendViaBot(ctx context.Context, p tg.InputPeerClass, in sendMes
 		return nil, err
 	}
 
-	key, err := s.spool.put(inlinePayload{Text: in.Text, ParseMode: in.ParseMode})
+	key, err := s.spool.put(inlinePayload{
+		Text:      in.Text,
+		ParseMode: in.ParseMode,
+		Owner:     s.selfID,
+	})
 	if err != nil {
 		return nil, err
 	}

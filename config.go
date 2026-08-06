@@ -23,11 +23,12 @@ type Config struct {
 	AllowProfileEdit bool
 	AllowInlineMedia bool
 
-	Attribution attributionMode
-	Strict      bool
-	AgentFooter string
-	BotToken    string
-	BotUsername string
+	Attribution     attributionMode
+	Strict          bool
+	AgentFooter     string
+	BotToken        string
+	BotUsername     string
+	BotAllowedUsers []int64
 }
 
 // LoadConfig reads configuration from the environment, optionally sourcing a
@@ -52,6 +53,7 @@ type Config struct {
 //	TG_AGENT_FOOTER       - footer text (default: "sent by an agent")
 //	TG_BOT_TOKEN          - echo bot token, required by "tgmcp echobot"
 //	TG_BOT_USERNAME       - echo bot @username; read from echobot.json when unset
+//	TG_BOT_ALLOWED_USERS  - extra user IDs allowed to claim inline payloads
 //
 // Telemetry is configured by the standard OTEL_* variables read by
 // [github.com/go-faster/sdk/app], see README.
@@ -118,11 +120,37 @@ func LoadConfig() (Config, error) {
 	cfg.BotToken = os.Getenv("TG_BOT_TOKEN")
 	cfg.BotUsername = strings.TrimPrefix(os.Getenv("TG_BOT_USERNAME"), "@")
 
+	allowed, err := parseUserIDs(os.Getenv("TG_BOT_ALLOWED_USERS"))
+	if err != nil {
+		return Config{}, errors.Wrap(err, "parse TG_BOT_ALLOWED_USERS")
+	}
+	cfg.BotAllowedUsers = allowed
+
 	if cfg.Attribution == attributionBot && cfg.BotToken == "" && cfg.BotUsername == "" {
 		return Config{}, errors.New("TG_ATTRIBUTION=bot requires TG_BOT_TOKEN or TG_BOT_USERNAME")
 	}
 
 	return cfg, nil
+}
+
+// parseUserIDs parses a comma-separated list of Telegram user IDs. Empty
+// entries are skipped, so trailing commas and blank values are tolerated.
+func parseUserIDs(s string) ([]int64, error) {
+	var out []int64
+	for field := range strings.SplitSeq(s, ",") {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+
+		id, err := strconv.ParseInt(field, 10, 64)
+		if err != nil {
+			return nil, errors.Wrapf(err, "user id %q", field)
+		}
+		out = append(out, id)
+	}
+
+	return out, nil
 }
 
 // sessionFolder derives a stable subdirectory name from a phone number.

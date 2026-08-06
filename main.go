@@ -240,6 +240,7 @@ func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry)
 				botUsername:      cfg.BotUsername,
 				sessionDir:       cfg.SessionDir,
 				spool:            newInlineSpool(cfg.SessionDir),
+				selfID:           self.ID,
 			}
 			m := mcp.NewServer(&mcp.Implementation{
 				Name:    "tgmcp",

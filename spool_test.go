@@ -16,7 +16,7 @@ func TestInlineSpoolRoundTrip(t *testing.T) {
 		t.Fatalf("put: %v", err)
 	}
 
-	got, err := s.take(key)
+	got, err := s.read(key)
 	if err != nil {
 		t.Fatalf("take: %v", err)
 	}
@@ -25,20 +25,39 @@ func TestInlineSpoolRoundTrip(t *testing.T) {
 	}
 }
 
-// TestInlineSpoolTakeIsSingleUse checks that a key cannot be replayed, so a
-// leaked inline query cannot resend the message.
-func TestInlineSpoolTakeIsSingleUse(t *testing.T) {
+// TestInlineSpoolReadDoesNotConsume checks that reading leaves the payload in
+// place, so that an unauthorized query cannot destroy a pending message.
+func TestInlineSpoolReadDoesNotConsume(t *testing.T) {
 	s := newInlineSpool(t.TempDir())
 
 	key, err := s.put(inlinePayload{Text: "hi"})
 	if err != nil {
 		t.Fatalf("put: %v", err)
 	}
-	if _, err := s.take(key); err != nil {
-		t.Fatalf("first take: %v", err)
+	if _, err := s.read(key); err != nil {
+		t.Fatalf("first read: %v", err)
 	}
-	if _, err := s.take(key); err == nil {
-		t.Fatal("second take: want error, got nil")
+	if _, err := s.read(key); err != nil {
+		t.Fatalf("second read: %v", err)
+	}
+}
+
+// TestInlineSpoolDropIsSingleUse checks that a claimed key cannot be replayed,
+// so a leaked inline query cannot resend the message.
+func TestInlineSpoolDropIsSingleUse(t *testing.T) {
+	s := newInlineSpool(t.TempDir())
+
+	key, err := s.put(inlinePayload{Text: "hi"})
+	if err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if _, err := s.read(key); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	s.drop(key)
+
+	if _, err := s.read(key); err == nil {
+		t.Fatal("read after drop: want error, got nil")
 	}
 }
 
@@ -55,7 +74,7 @@ func TestInlineSpoolRejectsBadKeys(t *testing.T) {
 		"aabbccddeeff00112233445566", // Hex, but too long.
 	} {
 		t.Run(key, func(t *testing.T) {
-			if _, err := s.take(key); err == nil {
+			if _, err := s.read(key); err == nil {
 				t.Errorf("take(%q): want error, got nil", key)
 			}
 		})
@@ -97,7 +116,7 @@ func TestInlineSpoolDrop(t *testing.T) {
 
 	s.drop(key)
 
-	if _, err := s.take(key); err == nil {
+	if _, err := s.read(key); err == nil {
 		t.Fatal("take after drop: want error, got nil")
 	}
 }

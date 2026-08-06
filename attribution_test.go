@@ -145,3 +145,94 @@ func TestStyledCaptionAttribution(t *testing.T) {
 		})
 	}
 }
+
+func TestInlineQueryAllowed(t *testing.T) {
+	const (
+		owner   = int64(100)
+		second  = int64(200)
+		outside = int64(300)
+	)
+
+	for _, tt := range []struct {
+		name    string
+		allowed map[int64]bool
+		owner   int64
+		user    int64
+		want    bool
+	}{
+		{name: "owner without list", owner: owner, user: owner, want: true},
+		{name: "stranger without list", owner: owner, user: outside, want: false},
+		{
+			name:    "listed user",
+			allowed: map[int64]bool{second: true},
+			owner:   owner,
+			user:    second,
+			want:    true,
+		},
+		{
+			name:    "unlisted user",
+			allowed: map[int64]bool{second: true},
+			owner:   owner,
+			user:    outside,
+			want:    false,
+		},
+		{
+			name:    "owner still allowed alongside list",
+			allowed: map[int64]bool{second: true},
+			owner:   owner,
+			user:    owner,
+			want:    true,
+		},
+		// A payload written before owners were recorded must not make every
+		// user look like the owner.
+		{name: "no owner recorded", owner: 0, user: 0, want: false},
+		{name: "no owner recorded, stranger", owner: 0, user: outside, want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := inlineQueryAllowed(tt.allowed, tt.owner, tt.user); got != tt.want {
+				t.Errorf("inlineQueryAllowed(%v, %d, %d) = %v, want %v",
+					tt.allowed, tt.owner, tt.user, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseUserIDs(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		in      string
+		want    []int64
+		wantErr bool
+	}{
+		{name: "empty", in: ""},
+		{name: "single", in: "123", want: []int64{123}},
+		{name: "multiple", in: "123,456", want: []int64{123, 456}},
+		{name: "spaces and trailing comma", in: " 123 , 456 , ", want: []int64{123, 456}},
+		{name: "negative", in: "-100123", want: []int64{-100123}},
+		{name: "not a number", in: "123,abc", wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseUserIDs(tt.in)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseUserIDs(%q): want error, got nil", tt.in)
+				}
+
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseUserIDs(%q): %v", tt.in, err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("ids = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("ids = %v, want %v", got, tt.want)
+
+					break
+				}
+			}
+		})
+	}
+}

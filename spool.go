@@ -28,6 +28,9 @@ type inlineSpool struct {
 type inlinePayload struct {
 	Text      string `json:"text"`
 	ParseMode string `json:"parse_mode,omitempty"`
+	// Owner is the account that spooled the payload. Only it may claim the
+	// key, so a leaked key is useless to anyone else.
+	Owner int64 `json:"owner,omitempty"`
 }
 
 const (
@@ -65,9 +68,12 @@ func (s *inlineSpool) put(p inlinePayload) (string, error) {
 	return key, nil
 }
 
-// take reads the payload for key and removes it, so that a key is good for a
-// single message.
-func (s *inlineSpool) take(key string) (inlinePayload, error) {
+// read returns the payload for key without consuming it.
+//
+// Reading and dropping are separate so that the caller can authorize the
+// requester first: consuming on read would let anyone holding a key destroy a
+// pending message even when they are not allowed to claim it.
+func (s *inlineSpool) read(key string) (inlinePayload, error) {
 	path, err := s.validPath(key)
 	if err != nil {
 		return inlinePayload{}, err
@@ -77,8 +83,6 @@ func (s *inlineSpool) take(key string) (inlinePayload, error) {
 	if err != nil {
 		return inlinePayload{}, errors.Wrap(err, "read payload")
 	}
-	// Best effort: a stale file is pruned by TTL anyway.
-	_ = os.Remove(path)
 
 	var p inlinePayload
 	if err := json.Unmarshal(data, &p); err != nil {
@@ -88,8 +92,8 @@ func (s *inlineSpool) take(key string) (inlinePayload, error) {
 	return p, nil
 }
 
-// drop removes the payload for key without reading it, for sends that failed
-// before the bot claimed it.
+// drop removes the payload for key, both once it has been claimed and for
+// sends that failed before the bot got to it.
 func (s *inlineSpool) drop(key string) {
 	if path, err := s.validPath(key); err == nil {
 		_ = os.Remove(path)
