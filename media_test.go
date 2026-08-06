@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/gotd/td/tg"
 )
 
@@ -260,5 +262,65 @@ func TestVisionPhotoSize(t *testing.T) {
 	// The inline pick must not silently become the biggest variant.
 	if got, _ := largestPhotoSize(full); got.Type != "w" {
 		t.Errorf("largestPhotoSize = %q, want %q", got.Type, "w")
+	}
+}
+
+func TestInlineContent(t *testing.T) {
+	data := []byte{1, 2, 3}
+
+	t.Run("image", func(t *testing.T) {
+		c, ok := inlineContent(data, "cat.png", "image/png").(*mcp.ImageContent)
+		if !ok {
+			t.Fatalf("content = %T, want *mcp.ImageContent", inlineContent(data, "cat.png", "image/png"))
+		}
+		if c.MIMEType != "image/png" {
+			t.Errorf("mime = %q, want image/png", c.MIMEType)
+		}
+	})
+
+	t.Run("audio", func(t *testing.T) {
+		c, ok := inlineContent(data, "voice.ogg", "audio/ogg").(*mcp.AudioContent)
+		if !ok {
+			t.Fatalf("content = %T, want *mcp.AudioContent", inlineContent(data, "voice.ogg", "audio/ogg"))
+		}
+		if c.MIMEType != "audio/ogg" {
+			t.Errorf("mime = %q, want audio/ogg", c.MIMEType)
+		}
+	})
+
+	// The case that used to be rejected outright.
+	t.Run("other becomes a resource", func(t *testing.T) {
+		c, ok := inlineContent(data, "clip.mp4", "video/mp4").(*mcp.EmbeddedResource)
+		if !ok {
+			t.Fatalf("content = %T, want *mcp.EmbeddedResource", inlineContent(data, "clip.mp4", "video/mp4"))
+		}
+		if c.Resource.MIMEType != "video/mp4" {
+			t.Errorf("mime = %q, want video/mp4", c.Resource.MIMEType)
+		}
+		if string(c.Resource.Blob) != string(data) {
+			t.Errorf("blob = %v, want %v", c.Resource.Blob, data)
+		}
+		if c.Resource.URI != "tgmcp://media/clip.mp4" {
+			t.Errorf("uri = %q, want tgmcp://media/clip.mp4", c.Resource.URI)
+		}
+	})
+}
+
+func TestInlineResourceURI(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "plain", in: "clip.mp4", want: "tgmcp://media/clip.mp4"},
+		{name: "empty", in: "", want: "tgmcp://media/file"},
+		{name: "spaces escaped", in: "my clip.mp4", want: "tgmcp://media/my%20clip.mp4"},
+		{name: "slashes escaped", in: "a/b.mp4", want: "tgmcp://media/a%2Fb.mp4"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := inlineResourceURI(tt.in); got != tt.want {
+				t.Errorf("inlineResourceURI(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
 	}
 }

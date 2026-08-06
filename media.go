@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"mime"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -15,7 +16,7 @@ import (
 	"github.com/gotd/td/tg"
 )
 
-// maxInlineMediaBytes bounds how large an image may be to be returned in the
+// maxInlineMediaBytes bounds how large a file may be to be returned in the
 // tool result. Base64 inflates it by a third on the wire and it lands directly
 // in the model's context, so keep it well below the file size Telegram allows.
 const maxInlineMediaBytes = 5 << 20
@@ -48,7 +49,7 @@ func (s *server) handleGetFile(ctx context.Context, _ *mcp.CallToolRequest, in g
 		return nil, getFileOutput{}, err
 	}
 	if in.Inline {
-		return s.inlineMedia(ctx, loc, mimeType, size)
+		return s.inlineMedia(ctx, loc, name, mimeType, size)
 	}
 	relPath := in.Path
 	if relPath == "" {
@@ -64,14 +65,14 @@ func (s *server) handleGetFile(ctx context.Context, _ *mcp.CallToolRequest, in g
 	return nil, getFileOutput{OK: true, Path: relPath, MimeType: mimeType, Size: size}, nil
 }
 
-// inlineMedia downloads an image into memory and returns it as an image content
-// block, which vision-capable clients render as an image instead of text.
-func (s *server) inlineMedia(ctx context.Context, loc tg.InputFileLocationClass, mimeType string, size int64) (*mcp.CallToolResult, getFileOutput, error) {
-	if !strings.HasPrefix(mimeType, "image/") {
-		return nil, getFileOutput{}, errors.Errorf("media type %q cannot be returned inline: images only", mimeType)
-	}
+// inlineMedia downloads media into memory and returns it in the tool result.
+//
+// Images and audio use the content blocks clients render natively; anything
+// else is returned as an embedded resource, so a caller can still retrieve a
+// file without a writable TG_FILE_ROOT.
+func (s *server) inlineMedia(ctx context.Context, loc tg.InputFileLocationClass, name, mimeType string, size int64) (*mcp.CallToolResult, getFileOutput, error) {
 	if size > maxInlineMediaBytes {
-		return nil, getFileOutput{}, errors.Errorf("image is %d bytes, over the %d byte inline limit: download it to disk instead", size, maxInlineMediaBytes)
+		return nil, getFileOutput{}, errors.Errorf("file is %d bytes, over the %d byte inline limit: download it to disk instead", size, maxInlineMediaBytes)
 	}
 
 	var buf bytes.Buffer
@@ -80,14 +81,47 @@ func (s *server) inlineMedia(ctx context.Context, loc tg.InputFileLocationClass,
 	}
 	// The advertised size can be absent or wrong, so bound the actual bytes too.
 	if buf.Len() > maxInlineMediaBytes {
-		return nil, getFileOutput{}, errors.Errorf("image is %d bytes, over the %d byte inline limit: download it to disk instead", buf.Len(), maxInlineMediaBytes)
+		return nil, getFileOutput{}, errors.Errorf("file is %d bytes, over the %d byte inline limit: download it to disk instead", buf.Len(), maxInlineMediaBytes)
 	}
 
 	res := &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.ImageContent{Data: buf.Bytes(), MIMEType: mimeType}},
+		Content: []mcp.Content{inlineContent(buf.Bytes(), name, mimeType)},
 	}
 
-	return res, getFileOutput{OK: true, MimeType: mimeType, Size: int64(buf.Len()), Inline: true}, nil
+	return res, getFileOutput{
+		OK:       true,
+		MimeType: mimeType,
+		Size:     int64(buf.Len()),
+		Inline:   true,
+	}, nil
+}
+
+// inlineContent picks the content block that best fits the media type.
+func inlineContent(data []byte, name, mimeType string) mcp.Content {
+	switch {
+	case strings.HasPrefix(mimeType, "image/"):
+		return &mcp.ImageContent{Data: data, MIMEType: mimeType}
+	case strings.HasPrefix(mimeType, "audio/"):
+		return &mcp.AudioContent{Data: data, MIMEType: mimeType}
+	default:
+		return &mcp.EmbeddedResource{
+			Resource: &mcp.ResourceContents{
+				URI:      inlineResourceURI(name),
+				MIMEType: mimeType,
+				Blob:     data,
+			},
+		}
+	}
+}
+
+// inlineResourceURI names an embedded resource. The URI identifies the blob
+// within the response, so any stable, unambiguous name will do.
+func inlineResourceURI(name string) string {
+	if name == "" {
+		name = "file"
+	}
+
+	return "tgmcp://media/" + url.PathEscape(name)
 }
 
 // fetchMessage fetches a single message by ID from peer, using the same
