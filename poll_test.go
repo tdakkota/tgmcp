@@ -143,3 +143,58 @@ func TestHasInlineResult(t *testing.T) {
 		})
 	}
 }
+
+// TestInlineResultFromMedia checks that a media result is described well
+// enough to know what sending it would post. Media results carry no title or
+// description, so without the file fields the caller is choosing blind.
+func TestInlineResultFromMedia(t *testing.T) {
+	got := inlineResultFrom(&tg.BotInlineMediaResult{
+		ID:   "gif123",
+		Type: "gif",
+		Document: &tg.Document{
+			MimeType: "video/mp4",
+			Size:     4096,
+			Attributes: []tg.DocumentAttributeClass{
+				&tg.DocumentAttributeVideo{W: 320, H: 240, Duration: 3},
+				&tg.DocumentAttributeFilename{FileName: "thumbs-up.mp4"},
+			},
+		},
+	})
+
+	if got.ID != "gif123" || got.Type != "gif" {
+		t.Errorf("id/type = %q/%q, want gif123/gif", got.ID, got.Type)
+	}
+	if got.MimeType != "video/mp4" {
+		t.Errorf("mime_type = %q, want video/mp4", got.MimeType)
+	}
+	if got.Size != 4096 {
+		t.Errorf("size = %d, want 4096", got.Size)
+	}
+	if got.FileName != "thumbs-up.mp4" {
+		t.Errorf("file_name = %q, want thumbs-up.mp4", got.FileName)
+	}
+	if got.Width != 320 || got.Height != 240 {
+		t.Errorf("dimensions = %dx%d, want 320x240", got.Width, got.Height)
+	}
+	if got.Duration != 3 {
+		t.Errorf("duration = %d, want 3", got.Duration)
+	}
+}
+
+func TestInlineResultFromArticle(t *testing.T) {
+	// Optional fields are flag-gated: the setters mark them present, which is
+	// what decoding real results does.
+	article := &tg.BotInlineResult{ID: "a1", Type: "article"}
+	article.SetTitle("Title")
+	article.SetDescription("Description")
+	article.SetURL("https://example.com")
+
+	got := inlineResultFrom(article)
+
+	if got.Title != "Title" || got.Description != "Description" {
+		t.Errorf("title/description = %q/%q", got.Title, got.Description)
+	}
+	if got.URL != "https://example.com" {
+		t.Errorf("url = %q, want https://example.com", got.URL)
+	}
+}
