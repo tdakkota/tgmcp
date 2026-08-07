@@ -5,7 +5,6 @@ import (
 	"io"
 	"mime"
 	"strconv"
-	"time"
 
 	"github.com/go-faster/errors"
 	"github.com/go-faster/gooners/blob"
@@ -57,7 +56,11 @@ func (s *server) handleGetFile(ctx context.Context, _ *mcp.CallToolRequest, in g
 	if _, err := downloader.NewDownloader().Download(s.api, loc).ToPath(ctx, abs); err != nil {
 		return nil, getFileOutput{}, errors.Wrap(err, "download")
 	}
-	return nil, getFileOutput{OK: true, Path: relPath, MimeType: mimeType, Size: size}, nil
+	return nil, getFileOutput{
+		OK:     true,
+		Path:   relPath,
+		Result: blob.Result{Name: name, MIMEType: mimeType, Size: size},
+	}, nil
 }
 
 // inlineMedia streams media into the blob store and returns tool-result
@@ -88,15 +91,15 @@ func (s *server) inlineMedia(ctx context.Context, loc tg.InputFileLocationClass,
 		return nil, getFileOutput{}, errors.Wrap(err, "store media")
 	}
 
-	out := getFileOutput{OK: true, MimeType: mimeType, Inline: true, Size: size}
+	out := getFileOutput{
+		OK:     true,
+		Inline: true,
+		Result: blob.Result{Name: name, MIMEType: mimeType, Size: size},
+	}
 	if b.URL != "" {
 		// Stored rather than inlined: report where it can be fetched.
 		out.Inline = false
-		out.URL = b.URL
-		out.BlobID = b.ID
-		out.Size = b.Size
-		out.MimeType = b.MIMEType
-		out.ExpiresAt = b.ExpiresAt.UTC().Format(time.RFC3339)
+		out.Result = b.Result()
 	}
 
 	return &mcp.CallToolResult{Content: content}, out, nil

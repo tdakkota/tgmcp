@@ -98,7 +98,7 @@ type uploadSource struct {
 // got from get_file, or from a server sharing the same store, and never has to
 // have a filesystem in common with this process.
 func (s *server) uploadSource(ctx context.Context, in sendFileInput) (uploadSource, error) {
-	return s.openSource(ctx, in.Path, in.BlobID)
+	return s.openSource(ctx, in.Path, in.Blob)
 }
 
 // openSource resolves one source named by either a path or a blob id.
@@ -124,9 +124,11 @@ func (s *server) openSource(ctx context.Context, filePath, blobID string) (uploa
 		}, nil
 	}
 
-	// The store validates the id before it becomes a key, so an id the model
-	// invented cannot name an object outside what the operator configured.
-	rc, b, err := s.blobs.Open(ctx, blobID)
+	// blob.Source.Open refuses an unset store and an empty id the same way
+	// every server does, and the store validates the id before it becomes a
+	// key, so an id the model invented cannot name an object outside what the
+	// operator configured.
+	rc, b, err := blob.Source{Blob: blobID}.Open(ctx, s.blobs)
 	if err != nil {
 		return uploadSource{}, errors.Wrapf(err, "open blob %q", blobID)
 	}
@@ -190,14 +192,14 @@ func blobMountPath(baseURL string) (string, error) {
 // tgmcp cannot make one: it would have to decode the video. The caller passes
 // a JPEG it prepared, which is also how the Bot API takes thumbnails.
 func (s *server) uploadThumbnail(ctx context.Context, b *message.RequestBuilder, in sendFileInput) (tg.InputFileClass, error) {
-	if in.ThumbnailPath == "" && in.ThumbnailBlobID == "" {
+	if in.ThumbnailPath == "" && in.ThumbnailBlob == "" {
 		return nil, nil
 	}
-	if in.ThumbnailPath != "" && in.ThumbnailBlobID != "" {
-		return nil, errors.New("give either thumbnail_path or thumbnail_blob_id, not both")
+	if in.ThumbnailPath != "" && in.ThumbnailBlob != "" {
+		return nil, errors.New("give either thumbnail_path or thumbnail_blob, not both")
 	}
 
-	src, err := s.openSource(ctx, in.ThumbnailPath, in.ThumbnailBlobID)
+	src, err := s.openSource(ctx, in.ThumbnailPath, in.ThumbnailBlob)
 	if err != nil {
 		return nil, errors.Wrap(err, "open thumbnail")
 	}

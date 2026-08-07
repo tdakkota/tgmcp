@@ -70,7 +70,7 @@ func TestSendFileSourceIsExclusive(t *testing.T) {
 		{name: "neither", in: sendFileInput{Chat: "me"}, wantErr: "exactly one"},
 		{
 			name:    "both",
-			in:      sendFileInput{Chat: "me", Path: "a.txt", BlobID: "tgmcp/x"},
+			in:      sendFileInput{Chat: "me", Path: "a.txt", Source: blob.Source{Blob: "tgmcp/x"}},
 			wantErr: "exactly one",
 		},
 	} {
@@ -108,7 +108,7 @@ func TestUploadSourceFromBlob(t *testing.T) {
 	}
 
 	srv := &server{blobs: store}
-	src, err := srv.uploadSource(t.Context(), sendFileInput{Chat: "me", BlobID: b.ID})
+	src, err := srv.uploadSource(t.Context(), sendFileInput{Chat: "me", Source: blob.Source{Blob: b.ID}})
 	if err != nil {
 		t.Fatalf("uploadSource: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestUploadSourceFromBlob(t *testing.T) {
 		t.Errorf("mime type: got %q, want %q", src.mimeType, "text/plain")
 	}
 
-	if _, err := srv.uploadSource(t.Context(), sendFileInput{Chat: "me", BlobID: "no-such-blob"}); err == nil {
+	if _, err := srv.uploadSource(t.Context(), sendFileInput{Chat: "me", Source: blob.Source{Blob: "no-such-blob"}}); err == nil {
 		t.Error("uploadSource on an unknown id: want error, got nil")
 	}
 }

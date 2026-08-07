@@ -165,9 +165,12 @@ type sendMessageOutput struct {
 }
 
 type sendFileInput struct {
+	// Source names a stored object to upload, as "blob". It is embedded
+	// rather than declared so that every server names it the same way.
+	blob.Source
+
 	Chat             string `json:"chat" jsonschema:"chat target"`
-	Path             string `json:"path,omitempty" jsonschema:"path relative to TG_FILE_ROOT or absolute inside it; give either this or blob_id"`
-	BlobID           string `json:"blob_id,omitempty" jsonschema:"id of a stored object to upload, as returned by get_file or by another MCP server sharing the store; give either this or path"`
+	Path             string `json:"path,omitempty" jsonschema:"path relative to TG_FILE_ROOT or absolute inside it; give either this or blob"`
 	Caption          string `json:"caption,omitempty" jsonschema:"optional caption"`
 	ParseMode        string `json:"parse_mode,omitempty" jsonschema:"caption format: plain (default, sent as-is), markdown or html"`
 	Kind             string `json:"kind,omitempty" jsonschema:"how Telegram should render it: auto (default, from the MIME type), document, photo, video, gif, audio, voice, video_note or sticker"`
@@ -175,7 +178,7 @@ type sendFileInput struct {
 	Width            int    `json:"width,omitempty" jsonschema:"pixel width, for video, gif and video_note"`
 	Height           int    `json:"height,omitempty" jsonschema:"pixel height, for video, gif and video_note"`
 	ThumbnailPath    string `json:"thumbnail_path,omitempty" jsonschema:"JPEG cover under TG_FILE_ROOT; Telegram needs one to treat a file as an animation"`
-	ThumbnailBlobID  string `json:"thumbnail_blob_id,omitempty" jsonschema:"stored JPEG cover, as an alternative to thumbnail_path"`
+	ThumbnailBlob    string `json:"thumbnail_blob,omitempty" jsonschema:"stored JPEG cover, as an alternative to thumbnail_path; a blob id, like blob"`
 	Title            string `json:"title,omitempty" jsonschema:"track title, for audio"`
 	Performer        string `json:"performer,omitempty" jsonschema:"track performer, for audio"`
 	ReplyToMessageID int    `json:"reply_to_message_id,omitempty" jsonschema:"reply to this message id"`
@@ -226,14 +229,13 @@ type getFileInput struct {
 }
 
 type getFileOutput struct {
-	OK        bool   `json:"ok" jsonschema:"true on success"`
-	Path      string `json:"path,omitempty" jsonschema:"path written, relative to TG_FILE_ROOT; empty when inline"`
-	URL       string `json:"url,omitempty" jsonschema:"URL to fetch the file from, when it was too large to return inline"`
-	BlobID    string `json:"blob_id,omitempty" jsonschema:"id of the stored object, which another MCP server sharing the same store can read; unlike url it does not expire"`
-	ExpiresAt string `json:"expires_at,omitempty" jsonschema:"RFC3339 time the URL stops working"`
-	MimeType  string `json:"mime_type,omitempty" jsonschema:"MIME type of the downloaded file, if known"`
-	Size      int64  `json:"size,omitempty" jsonschema:"size in bytes, if known"`
-	Inline    bool   `json:"inline,omitempty" jsonschema:"true if the file was returned in the tool result"`
+	// Result carries the stored object: its id for another tool, and its URL
+	// for the agent. Embedded so that every server returns the same shape.
+	blob.Result
+
+	OK     bool   `json:"ok" jsonschema:"true on success"`
+	Path   string `json:"path,omitempty" jsonschema:"path written, relative to TG_FILE_ROOT; empty when inline"`
+	Inline bool   `json:"inline,omitempty" jsonschema:"true if the file was returned in the tool result"`
 }
 
 type updateProfileInput struct {
@@ -329,7 +331,7 @@ func (s *server) register(m *mcp.Server) {
 
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "send_file",
-			Description: "Send a file, from TG_FILE_ROOT (path) or the blob store (blob_id). kind picks how Telegram renders it: auto, document, photo, video, gif, audio, voice, video_note, sticker.",
+			Description: "Send a file, from TG_FILE_ROOT (path) or the blob store (blob). kind picks how Telegram renders it: auto, document, photo, video, gif, audio, voice, video_note, sticker.",
 		}, s.handleSendFile)
 
 		mcp.AddTool(m, &mcp.Tool{
@@ -606,8 +608,8 @@ func (s *server) handleSendFile(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if in.Chat == "" {
 		return nil, sendFileOutput{}, errors.New("chat is required")
 	}
-	if (in.Path == "") == (in.BlobID == "") {
-		return nil, sendFileOutput{}, errors.New("exactly one of path or blob_id is required")
+	if (in.Path == "") == (in.Blob == "") {
+		return nil, sendFileOutput{}, errors.New("exactly one of path or blob is required")
 	}
 
 	kind, err := parseFileKind(in.Kind)

@@ -28,7 +28,7 @@ and unread state as the logged-in user.
 | `preview_format` | Render text with a parse_mode **without sending it**: returns the text Telegram will display, the entities and the length. |
 | `send_message` | Send text; optional parse_mode, reply_to_message_id, silent, no_webpage. |
 | `edit_message` | Replace the text, or the media caption, of a message you sent. Not possible for messages sent in `bot` attribution mode. |
-| `send_file` | Send a file, from TG_FILE_ROOT (`path`) or from the blob store (`blob_id`). `kind` picks how Telegram renders it. |
+| `send_file` | Send a file, from TG_FILE_ROOT (`path`) or from the blob store (`blob`). `kind` picks how Telegram renders it. |
 | `send_screenshot_notification` | Tell a chat that a screenshot was taken. Posts a visible service message. |
 
 ## How it works
@@ -285,7 +285,7 @@ and images come back as content blocks; anything else is stored and returned as
 a link, so a large file never enters the model's context:
 
 ```json
-{"ok": true, "url": "http://127.0.0.1:8080/blob/<id>/<name>", "blob_id": "tgmcp/<uuid>", "expires_at": "..."}
+{"ok": true, "blob": "tgmcp/<uuid>", "url": "http://127.0.0.1:8080/blob/<id>/<name>", "name": "clip.mp4", "expires_at": "..."}
 ```
 
 The client fetches that URL itself — with `curl`, a browser, or anything else —
@@ -321,15 +321,17 @@ when the URL stops working, not when the bytes go away. Set a bucket lifecycle
 rule — nothing in tgmcp will delete them for you, because a sweep would have to
 list a bucket every other server is sharing.
 
-`blob_id` is the other half of the pair. It names the object rather than
+`blob` is the other half of the pair. It names the object rather than
 granting access to it, it does not expire, and another MCP server pointed at the
 same bucket can read it directly. That is how one server's output becomes
 another's input without either fetching a URL the model chose.
 
-`send_file` takes one too, as an alternative to `path`, so the store is an
-input as well as an output: an id from `get_file`, or from another server
-sharing the store, uploads without this process and the agent needing a
-filesystem in common. Exactly one of the two is required — they name different
+The names come from `blob.Source` and `blob.Result`, which tgmcp embeds rather
+than declaring its own fields: an agent that learned the shape from one server
+then knows it for the rest. `send_file` takes a `blob` as an alternative to
+`path`, so the store is an input as well as an output — an id from `get_file`,
+or from another server sharing the store, uploads without this process and the
+agent needing a filesystem in common. Exactly one of the two is required — they name different
 bytes, so accepting both would mean silently ignoring one. The id is validated
 by the store before it becomes a key, so one the model invented cannot name an
 object outside the configured prefix.
