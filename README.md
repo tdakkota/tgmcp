@@ -28,7 +28,7 @@ and unread state as the logged-in user.
 | `preview_format` | Render text with a parse_mode **without sending it**: returns the text Telegram will display, the entities and the length. |
 | `send_message` | Send text; optional parse_mode, reply_to_message_id, silent, no_webpage. |
 | `edit_message` | Replace the text, or the media caption, of a message you sent. Not possible for messages sent in `bot` attribution mode. |
-| `send_file` | Send file from TG_FILE_ROOT; optional caption, parse_mode, as_photo, reply, silent. |
+| `send_file` | Send a file, from TG_FILE_ROOT (`path`) or from the blob store (`blob_id`); optional caption, parse_mode, as_photo, reply, silent. |
 | `send_screenshot_notification` | Tell a chat that a screenshot was taken. Posts a visible service message. |
 
 ## How it works
@@ -273,6 +273,14 @@ list a bucket every other server is sharing.
 granting access to it, it does not expire, and another MCP server pointed at the
 same bucket can read it directly. That is how one server's output becomes
 another's input without either fetching a URL the model chose.
+
+`send_file` takes one too, as an alternative to `path`, so the store is an
+input as well as an output: an id from `get_file`, or from another server
+sharing the store, uploads without this process and the agent needing a
+filesystem in common. Exactly one of the two is required — they name different
+bytes, so accepting both would mean silently ignoring one. The id is validated
+by the store before it becomes a key, so one the model invented cannot name an
+object outside the configured prefix.
 
 `TG_BLOB_BASE_URL` is separate from `MCP_ADDR` on purpose: the server listens
 where `MCP_ADDR` says and advertises what `TG_BLOB_BASE_URL` says, so it can sit

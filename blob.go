@@ -3,11 +3,16 @@ package main
 import (
 	"context"
 	"log/slog"
+	"mime"
 	"net/url"
+	"path"
+	"path/filepath"
 
 	"github.com/go-faster/errors"
 	"github.com/go-faster/gooners/blob"
 	"github.com/go-faster/gooners/blob/s3"
+
+	"github.com/gotd/td/telegram/message"
 )
 
 // newS3BlobStore builds the bucket-backed store. It fails at startup rather
@@ -70,6 +75,64 @@ func newBlobStore(ctx context.Context, cfg Config, lg *slog.Logger) (blob.Store,
 	}
 
 	return store, nil
+}
+
+// uploadSource is where send_file reads its bytes from, with the metadata
+// Telegram needs to show them as a file rather than as a numeric id.
+type uploadSource struct {
+	option   message.UploadOption
+	name     string
+	mimeType string
+	// release frees the source; the caller must call it.
+	release func()
+}
+
+// uploadSource resolves the source named by in.
+//
+// A blob id makes the store an input as well as an output, which is what lets
+// one MCP server's file become another's upload: the agent passes the id it
+// got from get_file, or from a server sharing the same store, and never has to
+// have a filesystem in common with this process.
+func (s *server) uploadSource(ctx context.Context, in sendFileInput) (uploadSource, error) {
+	if in.BlobID == "" {
+		root := s.fileRootVal
+		if root == "" {
+			return uploadSource{}, errors.New("TG_FILE_ROOT not configured")
+		}
+
+		abs, err := safeJoin(root, in.Path)
+		if err != nil {
+			return uploadSource{}, err
+		}
+
+		name := filepath.Base(abs)
+
+		return uploadSource{
+			option:   message.FromPath(abs),
+			name:     name,
+			mimeType: mime.TypeByExtension(filepath.Ext(name)),
+			release:  func() {},
+		}, nil
+	}
+
+	// The store validates the id before it becomes a key, so an id the model
+	// invented cannot name an object outside what the operator configured.
+	rc, b, err := s.blobs.Open(ctx, in.BlobID)
+	if err != nil {
+		return uploadSource{}, errors.Wrapf(err, "open blob %q", in.BlobID)
+	}
+
+	name := b.Name
+	if name == "" {
+		name = path.Base(b.ID)
+	}
+
+	return uploadSource{
+		option:   message.FromReader(name, rc),
+		name:     name,
+		mimeType: b.MIMEType,
+		release:  func() { _ = rc.Close() },
+	}, nil
 }
 
 // blobMountPath is the path component of the configured base URL, which is

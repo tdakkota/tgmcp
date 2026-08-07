@@ -166,7 +166,8 @@ type sendMessageOutput struct {
 
 type sendFileInput struct {
 	Chat             string `json:"chat" jsonschema:"chat target"`
-	Path             string `json:"path" jsonschema:"path relative to TG_FILE_ROOT or absolute inside it"`
+	Path             string `json:"path,omitempty" jsonschema:"path relative to TG_FILE_ROOT or absolute inside it; give either this or blob_id"`
+	BlobID           string `json:"blob_id,omitempty" jsonschema:"id of a stored object to upload, as returned by get_file or by another MCP server sharing the store; give either this or path"`
 	Caption          string `json:"caption,omitempty" jsonschema:"optional caption"`
 	ParseMode        string `json:"parse_mode,omitempty" jsonschema:"caption format: plain (default, sent as-is), markdown or html"`
 	AsPhoto          bool   `json:"as_photo,omitempty" jsonschema:"send as photo if true"`
@@ -594,17 +595,19 @@ func (s *server) handleSendMessage(ctx context.Context, _ *mcp.CallToolRequest, 
 }
 
 func (s *server) handleSendFile(ctx context.Context, _ *mcp.CallToolRequest, in sendFileInput) (*mcp.CallToolResult, sendFileOutput, error) {
-	if in.Chat == "" || in.Path == "" {
-		return nil, sendFileOutput{}, errors.New("chat and path are required")
+	if in.Chat == "" {
+		return nil, sendFileOutput{}, errors.New("chat is required")
 	}
-	root := s.fileRootVal
-	if root == "" {
-		return nil, sendFileOutput{}, errors.New("TG_FILE_ROOT not configured")
+	if (in.Path == "") == (in.BlobID == "") {
+		return nil, sendFileOutput{}, errors.New("exactly one of path or blob_id is required")
 	}
-	abs, err := safeJoin(root, in.Path)
+
+	src, err := s.uploadSource(ctx, in)
 	if err != nil {
 		return nil, sendFileOutput{}, err
 	}
+	defer src.release()
+
 	p, err := s.resolvePeer(ctx, in.Chat)
 	if err != nil {
 		return nil, sendFileOutput{}, err
@@ -620,11 +623,25 @@ func (s *server) handleSendFile(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, sendFileOutput{}, err
 	}
+	// Upload first, then describe the result: gotd sets no filename attribute
+	// of its own, and a document without one shows up in Telegram as its
+	// numeric id rather than as the file it is.
+	f, err := b.Upload(src.option).AsInputFile(ctx)
+	if err != nil {
+		return nil, sendFileOutput{}, errors.Wrap(err, "upload file")
+	}
+
 	var upd tg.UpdatesClass
 	if in.AsPhoto {
-		upd, err = b.Upload(message.FromPath(abs)).Photo(ctx, caption...)
+		upd, err = b.Media(ctx, message.UploadedPhoto(f, caption...))
 	} else {
-		upd, err = b.Upload(message.FromPath(abs)).File(ctx, caption...)
+		doc := message.UploadedDocument(f, caption...).
+			Filename(src.name).
+			ForceFile(true)
+		if src.mimeType != "" {
+			doc = doc.MIME(src.mimeType)
+		}
+		upd, err = b.Media(ctx, doc)
 	}
 	if err != nil {
 		return nil, sendFileOutput{}, errors.Wrap(err, "send file")
