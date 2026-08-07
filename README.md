@@ -27,7 +27,7 @@ and unread state as the logged-in user.
 | `search_chat_messages` | Search messages in a chat (optional filter: photo/video/document/url/...). |
 | `preview_format` | Render text with a parse_mode **without sending it**: returns the text Telegram will display, the entities and the length. |
 | `send_message` | Send text; optional parse_mode, reply_to_message_id, silent, no_webpage. |
-| `edit_message` | Replace the text, or the media caption, of a message you sent. |
+| `edit_message` | Replace the text, or the media caption, of a message you sent. Not possible for messages sent in `bot` attribution mode. |
 | `send_file` | Send file from TG_FILE_ROOT; optional caption, parse_mode, as_photo, reply, silent. |
 | `send_screenshot_notification` | Tell a chat that a screenshot was taken. Posts a visible service message. |
 
@@ -195,6 +195,12 @@ If the echo bot is down, or the chat forbids inline bots,
 `TG_ATTRIBUTION_STRICT=true` fails the send, while the default degrades to the
 footer. `send_message` and `send_file` return the attribution actually applied
 in their `attribution` field, so the calling agent can tell what happened.
+
+A message sent in `bot` mode **cannot be edited afterwards**. Telegram answers
+`INLINE_BOT_REQUIRED`: only the bot may edit what it sent, through
+`messages.editInlineBotMessage`, and that needs an inline message id the
+sending account never receives. `edit_message` reports this as an error naming
+the cause. If a message has to stay editable, send it under `footer` or `off`.
 
 Uploads always use the footer: an inline result cannot carry a local file. Rich
 messages likewise, and their footer is appended to the source in its own syntax

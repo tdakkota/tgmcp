@@ -67,6 +67,22 @@ func TestRenderRich(t *testing.T) {
 			want: `| a\|b c |` + "\n| :---: |",
 		},
 		{
+			// Telegram lets a style span its own padding; Markdown does not,
+			// so the whitespace has to move outside the markers.
+			name: "whitespace is hoisted out of emphasis",
+			blocks: []tg.PageBlockClass{&tg.PageBlockParagraph{Text: &tg.TextConcat{Texts: []tg.RichTextClass{
+				plain("и"),
+				&tg.TextBold{Text: plain(" снова")},
+				&tg.TextBold{Text: plain("\nна новой строке\n")},
+			}}}},
+			want: "и **снова**\n**на новой строке**\n",
+		},
+		{
+			name:   "blank emphasis is left alone",
+			blocks: []tg.PageBlockClass{&tg.PageBlockParagraph{Text: &tg.TextBold{Text: plain("  ")}}},
+			want:   "  ",
+		},
+		{
 			name: "checklist",
 			blocks: []tg.PageBlockClass{&tg.PageBlockList{Items: []tg.PageListItemClass{
 				&tg.PageListItemText{Checkbox: true, Checked: true, Text: plain("done")},

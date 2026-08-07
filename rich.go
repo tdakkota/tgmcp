@@ -30,25 +30,25 @@ func renderRich(blocks []tg.PageBlockClass) string {
 func renderBlock(block tg.PageBlockClass) string {
 	switch b := block.(type) {
 	case *tg.PageBlockTitle:
-		return "# " + renderText(b.Text)
+		return heading(1, b.Text)
 	case *tg.PageBlockSubtitle:
-		return "## " + renderText(b.Text)
+		return heading(2, b.Text)
 	case *tg.PageBlockHeading1:
-		return "# " + renderText(b.Text)
+		return heading(1, b.Text)
 	case *tg.PageBlockHeading2:
-		return "## " + renderText(b.Text)
+		return heading(2, b.Text)
 	case *tg.PageBlockHeading3:
-		return "### " + renderText(b.Text)
+		return heading(3, b.Text)
 	case *tg.PageBlockHeading4:
-		return "#### " + renderText(b.Text)
+		return heading(4, b.Text)
 	case *tg.PageBlockHeading5:
-		return "##### " + renderText(b.Text)
+		return heading(5, b.Text)
 	case *tg.PageBlockHeading6:
-		return "###### " + renderText(b.Text)
+		return heading(6, b.Text)
 	case *tg.PageBlockHeader:
-		return "## " + renderText(b.Text)
+		return heading(2, b.Text)
 	case *tg.PageBlockSubheader:
-		return "### " + renderText(b.Text)
+		return heading(3, b.Text)
 	case *tg.PageBlockKicker:
 		return renderText(b.Text)
 	case *tg.PageBlockFooter:
@@ -102,6 +102,17 @@ func renderBlock(block tg.PageBlockClass) string {
 	default:
 		return "[" + strings.TrimPrefix(block.TypeName(), "pageBlock") + "]"
 	}
+}
+
+// heading renders a heading block. The text is trimmed: a heading cannot span
+// lines, and Telegram lets one carry leading or trailing newlines.
+func heading(level int, text tg.RichTextClass) string {
+	body := strings.TrimSpace(renderText(text))
+	if body == "" {
+		return ""
+	}
+
+	return strings.Repeat("#", level) + " " + body
 }
 
 func renderList(items []tg.PageListItemClass) string {
@@ -313,14 +324,19 @@ func renderText(text tg.RichTextClass) string {
 	}
 }
 
-// wrap applies an inline marker, skipping empty text so that "****" cannot
-// appear in the output.
+// wrap applies an inline marker, hoisting any surrounding whitespace out of
+// it: Markdown emphasis does not span a marker followed by a space, so
+// "** bold**" would render literally, markers included.
+//
+// Empty text is skipped so that "****" cannot appear in the output.
 func wrap(marker, s string) string {
-	if s == "" {
-		return ""
+	body := strings.TrimSpace(s)
+	if body == "" {
+		return s
 	}
+	lead := s[:strings.Index(s, body)]
 
-	return marker + s + marker
+	return lead + marker + body + marker + s[len(lead)+len(body):]
 }
 
 func tagged(tag, s string) string {
