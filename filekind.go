@@ -117,7 +117,9 @@ func (k fileKind) mediaOption(
 
 	switch k {
 	case fileKindVideo:
-		return video(doc.Video(), in).SupportsStreaming()
+		// nosound_video is what keeps a silent mp4 a video: without it the
+		// server promotes one to an animation, which is not what was asked.
+		return video(doc.NosoundVideo(true).Video(), in).SupportsStreaming()
 	case fileKindVideoNote:
 		// nosound_video is what tdlib sets here, and without it Telegram
 		// downgrades the round message to an ordinary video.

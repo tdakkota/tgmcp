@@ -195,39 +195,28 @@ in the result, with `auto` resolved.
 `duration_seconds` for audio ones: Telegram shows no duration and can misplace
 the aspect ratio without them. tgmcp does not probe the file to find out.
 
-Two kinds are **not confirmed working**: `gif` and `video_note` both arrive as
-an ordinary video. What is known:
-
-- The outgoing request matches tdlib's, field for field —
-  `filekind_media_test.go` pins it against `AnimationsManager::get_input_media`
-  and `VideoNotesManager::get_input_media`. An animation is a plain mp4
-  document there, with no `animated` attribute; a round message carries
-  `round_message` plus `nosound_video`.
-- It is not the file. Re-uploading the exact bytes of a message Telegram
-  already serves as an animation still comes back as a video.
+An upload must carry its **size**. `message.FromReader` cannot know it, and
+gotd turns an unsized upload into `inputFileBig` with no MD5 checksum — which
+no real client does for a small file, and which stops Telegram classifying the
+result: an animation arrived as a video, a round message as a plain one. tgmcp
+uploads through `message.FromFile` so the store's known size reaches the
+uploader. Nothing about the attributes was ever wrong.
 
 `nosound_video` is not the flag it sounds like: it means "send as a video even
 without an audio track", and is documented to *suppress*
-`documentAttributeAnimated`. It belongs on a video note, which tdlib sets, and
-must stay off an animation.
+`documentAttributeAnimated`. So it belongs on `video` and `video_note`, where
+it keeps a silent file from being promoted to an animation, and must stay off
+`gif`.
 
-Beware a false positive: gotd's `GIF()` helper forces the MIME type to
-`image/gif`, and Telegram then stores mp4 bytes verbatim as a plain document.
-Lenient clients play it and it looks like a working GIF; it carries no
-`animated` attribute.
-
-What has been ruled out, by sending the **exact bytes** of a message Telegram
-already serves as an animation and getting a video back: the file, its
-encoding, the audio track, faststart, the dimensions, the MIME type, the
-filename attribute, and the thumbnail. The request matches what tdesktop
-builds in `PrepareUploadedDocument` and `ComposeSendingDocumentAttributes`.
-
-Everything else round-trips.
+Beware one false positive: gotd's `GIF()` helper forces the MIME type to
+`image/gif`, and Telegram stores mp4 bytes verbatim under it. Lenient clients
+play the result and it looks like a working GIF; it carries no `animated`
+attribute and is a plain document.
 
 `thumbnail_path` and `thumbnail_blob_id` attach a JPEG cover. tgmcp cannot make
 one — that would mean decoding the video — so the caller supplies it, as the
-Bot API does. It did not turn out to be what animations need, but it is what
-gives a video a preview frame.
+Bot API does. Optional: it is not needed for
+classification, only for the preview frame.
 
 ### Agent attribution
 

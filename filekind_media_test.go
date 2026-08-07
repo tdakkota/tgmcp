@@ -62,6 +62,10 @@ func TestFileKindAttributes(t *testing.T) {
 		if v.W != 720 || v.H != 720 || v.Duration != 6 {
 			t.Errorf("video: got %dx%d %.0fs, want 720x720 6s", v.W, v.H, v.Duration)
 		}
+		// Without it a silent mp4 comes back as an animation.
+		if !doc.NosoundVideo {
+			t.Error("video: want nosound_video, so a silent file stays a video")
+		}
 		if fileName(doc) != "clip.mp4" {
 			t.Errorf("video: file name %q, want clip.mp4", fileName(doc))
 		}

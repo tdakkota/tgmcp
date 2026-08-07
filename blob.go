@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"mime"
 	"net/url"
+	"os"
 	"path"
 	"path/filepath"
+	"time"
 
 	"github.com/go-faster/errors"
 	"github.com/go-faster/gooners/blob"
@@ -134,12 +137,34 @@ func (s *server) openSource(ctx context.Context, filePath, blobID string) (uploa
 	}
 
 	return uploadSource{
-		option:   message.FromReader(name, rc),
+		// Not message.FromReader: it cannot know the length, and gotd sends an
+		// unsized upload as inputFileBig with no MD5 checksum, which no real
+		// client does for a small file. The store knows the size, so say it.
+		option:   message.FromFile(&blobFile{Reader: rc, name: name, size: b.Size}),
 		name:     name,
 		mimeType: b.MIMEType,
 		release:  func() { _ = rc.Close() },
 	}, nil
 }
+
+// blobFile adapts a stored object to [uploader.File], whose Stat is how the
+// uploader learns the size.
+type blobFile struct {
+	io.Reader
+	name string
+	size int64
+}
+
+func (f *blobFile) Stat() (os.FileInfo, error) { return blobFileInfo{f}, nil }
+
+type blobFileInfo struct{ f *blobFile }
+
+func (i blobFileInfo) Name() string       { return i.f.name }
+func (i blobFileInfo) Size() int64        { return i.f.size }
+func (i blobFileInfo) Mode() os.FileMode  { return 0 }
+func (i blobFileInfo) ModTime() time.Time { return time.Time{} }
+func (i blobFileInfo) IsDir() bool        { return false }
+func (i blobFileInfo) Sys() any           { return nil }
 
 // blobMountPath is the path component of the configured base URL, which is
 // where the handler must be mounted for the URLs it hands out to resolve.
