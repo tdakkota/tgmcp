@@ -195,11 +195,19 @@ in the result, with `auto` resolved.
 `duration_seconds` for audio ones: Telegram shows no duration and can misplace
 the aspect ratio without them. tgmcp does not probe the file to find out.
 
-Two kinds are **not confirmed working**: `gif` arrives as a plain video and
-`video_note` as a plain video rather than a round one. The request is right —
-`filekind_media_test.go` asserts that `animated`, `nosound_video` and
-`round_message` are all set on the outgoing document — so Telegram is
-downgrading them for a reason not yet identified. Everything else round-trips.
+Two kinds are **not confirmed working**: `gif` and `video_note` both arrive as
+an ordinary video. What is known:
+
+- The outgoing request matches tdlib's, field for field —
+  `filekind_media_test.go` pins it against `AnimationsManager::get_input_media`
+  and `VideoNotesManager::get_input_media`. An animation is a plain mp4
+  document there, with no `animated` attribute; a round message carries
+  `round_message` plus `nosound_video`.
+- It is not the file. Re-uploading the exact bytes of a message Telegram
+  already serves as an animation still comes back as a video.
+
+The one difference left untested is the thumbnail, which tdlib uploads
+alongside both. Everything else round-trips.
 
 ### Agent attribution
 

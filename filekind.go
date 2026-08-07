@@ -112,19 +112,18 @@ func (k fileKind) mediaOption(
 	case fileKindVideo:
 		return video(doc.Video(), in).SupportsStreaming()
 	case fileKindVideoNote:
-		// A round video is square by definition, so one dimension is enough.
-		return video(doc.RoundVideo(), in).Round()
+		// nosound_video is what tdlib sets here, and without it Telegram
+		// downgrades the round message to an ordinary video.
+		return video(doc.NosoundVideo(true).RoundVideo(), in).Round()
 	case fileKindGIF:
-		// Not [message.UploadedDocumentBuilder.GIF]: it forces the MIME type
-		// to image/gif, and an mp4 sent under that label arrives as a plain
-		// document. An animation is the animated attribute, not the MIME.
+		// An animation is a plain mp4 document, which is what tdlib sends:
+		// no animated attribute, no nosound flag, no streaming. The server
+		// makes it an animation because the file carries no audio track, so
+		// the caller has to supply one that does not.
 		//
-		// nosound_video is what makes Telegram keep the animation: without it
-		// the file comes back as an ordinary video.
-		return video(doc.
-			Attributes(&tg.DocumentAttributeAnimated{}).
-			NosoundVideo(true).
-			Video(), in)
+		// Not [message.UploadedDocumentBuilder.GIF] either: that forces the
+		// MIME type to image/gif, under which an mp4 is unreadable.
+		return video(doc.Video(), in)
 	case fileKindAudio:
 		return audio(doc.Audio(), in)
 	case fileKindVoice:

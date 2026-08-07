@@ -67,28 +67,37 @@ func TestFileKindAttributes(t *testing.T) {
 		}
 	})
 
+	// tdlib sends round_message with nosound_video, see VideoNotesManager.
 	t.Run("video_note is round and unnamed", func(t *testing.T) {
 		doc := sentDocument(t, fileKindVideoNote, in)
 		if !videoAttr(t, doc).RoundMessage {
 			t.Error("video_note: want round_message")
+		}
+		if !doc.NosoundVideo {
+			t.Error("video_note: want nosound_video, as tdlib sends")
 		}
 		if n := fileName(doc); n != "" {
 			t.Errorf("video_note: file name %q, want none", n)
 		}
 	})
 
-	t.Run("gif is animated and keeps its mime", func(t *testing.T) {
+	// tdlib sends an animation as a plain mp4 document and lets the server
+	// classify it from the missing audio track, see AnimationsManager.
+	t.Run("gif matches what tdlib sends", func(t *testing.T) {
 		doc := sentDocument(t, fileKindGIF, in)
-		if !hasAttr[*tg.DocumentAttributeAnimated](doc) {
-			t.Error("gif: want the animated attribute")
+		if hasAttr[*tg.DocumentAttributeAnimated](doc) {
+			t.Error("gif: tdlib sends no animated attribute")
 		}
-		// gotd's GIF() helper forces image/gif, which makes Telegram treat an
-		// mp4 as an unreadable document.
+		if doc.NosoundVideo {
+			t.Error("gif: tdlib leaves nosound_video unset")
+		}
+		// gotd's GIF() helper forces image/gif, under which an mp4 is an
+		// unreadable document.
 		if doc.MimeType != "video/mp4" {
 			t.Errorf("gif: mime %q, want video/mp4", doc.MimeType)
 		}
-		if !doc.NosoundVideo {
-			t.Error("gif: want nosound_video, or Telegram drops the animation")
+		if v := videoAttr(t, doc); v.SupportsStreaming {
+			t.Error("gif: tdlib does not mark an animation streamable")
 		}
 	})
 
