@@ -53,18 +53,24 @@ type UnreadChannel struct {
 type Message struct {
 	ID        int    `json:"id" jsonschema:"message ID"`
 	Date      string `json:"date" jsonschema:"send time in RFC3339"`
+	EditDate  string `json:"edit_date,omitempty" jsonschema:"time of the last edit in RFC3339, if the message was edited"`
 	Text      string `json:"text" jsonschema:"message text; for a rich message, its blocks rendered as Markdown"`
 	Rich      bool   `json:"rich,omitempty" jsonschema:"true if the message is a rich message: structured blocks such as headings, lists and tables"`
 	Truncated bool   `json:"truncated,omitempty" jsonschema:"true if the rich message was delivered in part and more content exists"`
 	Author    string `json:"author,omitempty" jsonschema:"sender name, for groups"`
 	Out       bool   `json:"out,omitempty" jsonschema:"true if outgoing"`
 	ReplyToID int    `json:"reply_to_id,omitempty" jsonschema:"ID of message being replied to"`
-	HasMedia  bool   `json:"has_media,omitempty" jsonschema:"true if the message has downloadable media (see get_file)"`
-	MediaType string `json:"media_type,omitempty" jsonschema:"media kind: photo, video, gif, video_note, audio, voice, sticker, document or poll"`
-	FileName  string `json:"file_name,omitempty" jsonschema:"file name of the attached document, if any"`
-	Poll      *Poll  `json:"poll,omitempty" jsonschema:"poll contents and tally, when media_type is poll"`
-	Service   bool   `json:"service,omitempty" jsonschema:"true for service messages, which carry an action instead of text"`
-	Action    string `json:"action,omitempty" jsonschema:"service action, e.g. screenshot_taken, pin_message, chat_add_user"`
+	// Forward is a pointer so that "not a forward" and "a forward whose source
+	// is hidden" stay distinguishable.
+	Forward   *Forward   `json:"forward,omitempty" jsonschema:"where the message was forwarded from; absent if the sender wrote it"`
+	Reactions []Reaction `json:"reactions,omitempty" jsonschema:"reaction tally, most used first"`
+	AlbumID   string     `json:"album_id,omitempty" jsonschema:"messages sharing this value were sent as one album, and only one of them carries the caption"`
+	HasMedia  bool       `json:"has_media,omitempty" jsonschema:"true if the message has downloadable media (see get_file)"`
+	MediaType string     `json:"media_type,omitempty" jsonschema:"media kind: photo, video, gif, video_note, audio, voice, sticker, document or poll"`
+	FileName  string     `json:"file_name,omitempty" jsonschema:"file name of the attached document, if any"`
+	Poll      *Poll      `json:"poll,omitempty" jsonschema:"poll contents and tally, when media_type is poll"`
+	Service   bool       `json:"service,omitempty" jsonschema:"true for service messages, which carry an action instead of text"`
+	Action    string     `json:"action,omitempty" jsonschema:"service action, e.g. screenshot_taken, pin_message, chat_add_user"`
 }
 
 // bootstrapDialogs loads the full dialog list once and seeds the cache. It
@@ -345,6 +351,20 @@ func messageFromTG(msg *tg.Message, ent entities) Message {
 			m.ReplyToID = rtm.ReplyToMsgID
 		}
 	}
+	if d, ok := msg.GetEditDate(); ok {
+		m.EditDate = time.Unix(int64(d), 0).UTC().Format(time.RFC3339)
+	}
+	if fwd, ok := msg.GetFwdFrom(); ok {
+		m.Forward = forwardFrom(ent, fwd)
+	}
+	if r, ok := msg.GetReactions(); ok {
+		m.Reactions = reactionsFrom(r)
+	}
+	if id, ok := msg.GetGroupedID(); ok {
+		// As a string: the id is a random int64, and a JSON number keeps only
+		// the top 53 bits of one in any client that parses it as a double.
+		m.AlbumID = strconv.FormatInt(id, 10)
+	}
 	if media, ok := msg.GetMedia(); ok {
 		switch mm := media.(type) {
 		case *tg.MessageMediaPhoto:
@@ -385,6 +405,9 @@ func messageFromService(msg *tg.MessageService, ent entities) Message {
 			m.ReplyToID = rtm.ReplyToMsgID
 		}
 	}
+	if r, ok := msg.GetReactions(); ok {
+		m.Reactions = reactionsFrom(r)
+	}
 
 	return m
 }
@@ -415,25 +438,52 @@ func snakeCase(s string) string {
 	return b.String()
 }
 
-// authorName resolves a human-readable sender name, when the sender is a user
+// authorName resolves a human-readable sender name, when the sender is
 // present in the entities.
 func authorName(ent entities, from tg.PeerClass, ok bool) string {
 	if !ok {
 		return ""
 	}
-	pu, ok := from.(*tg.PeerUser)
-	if !ok {
+
+	return peerName(ent, from)
+}
+
+// peerName resolves a human-readable name for a peer present in the entities:
+// a user's full name, or a group's or channel's title.
+//
+// Not only users: an anonymous admin and a signed channel post both name a
+// channel as their sender, and reporting nothing for those reads as if the
+// message had no author at all.
+func peerName(ent entities, p tg.PeerClass) string {
+	switch v := p.(type) {
+	case *tg.PeerUser:
+		u, ok := ent.User(v.UserID)
+		if !ok {
+			return ""
+		}
+		name := strings.TrimSpace(u.FirstName + " " + u.LastName)
+		if name == "" {
+			name, _ = u.GetUsername()
+		}
+
+		return name
+	case *tg.PeerChat:
+		c, ok := ent.Chat(v.ChatID)
+		if !ok {
+			return ""
+		}
+
+		return c.Title
+	case *tg.PeerChannel:
+		c, ok := ent.Channel(v.ChannelID)
+		if !ok {
+			return ""
+		}
+
+		return c.Title
+	default:
 		return ""
 	}
-	u, ok := ent.User(pu.UserID)
-	if !ok {
-		return ""
-	}
-	name := strings.TrimSpace(u.FirstName + " " + u.LastName)
-	if name == "" {
-		name, _ = u.GetUsername()
-	}
-	return name
 }
 
 // markPeerRead marks all messages in a dialog as read up to and including the
