@@ -89,6 +89,7 @@ tool call. Instead, mirroring [tdlib](https://github.com/tdlib/td)'s strategy:
 | `TG_BOT_TOKEN` | no | — | Echo bot token, required by `tgmcp echobot`. |
 | `TG_BOT_USERNAME` | no | — | Echo bot `@username`. Read from the identity the running bot publishes when unset. |
 | `TG_BOT_ALLOWED_USERS` | no | — | Extra user IDs allowed to claim inline payloads, comma-separated. The spooling account is always allowed. |
+| `TG_LOG_PAYLOADS` | no | off | `true` writes MCP request and response bodies to the debug log. That is the contents of chats — see [What is logged](#what-is-logged). |
 
 Every right is **opt-in** and granted only by the literal string `true`:
 anything else, including `1` and `TRUE`, leaves it off. Without any of them the
@@ -150,6 +151,20 @@ columns: 2` — which answers the question that actually matters: did the table
 parse as a table, or as a paragraph of pipes. That preview is parsed locally,
 so it carries a `note` saying so; the server may differ on media, footnotes and
 maps.
+
+### What is logged
+
+At `LOG_LEVEL=debug`, tgmcp logs which tool was called, how long it took and
+whether it failed. It does **not** log the arguments or the result, because
+those are the contents of your chats: message text, peer details, downloaded
+file names. `TG_LOG_PAYLOADS=true` turns that on for debugging, and it applies
+to every configured log exporter, not just the terminal — with
+`OTEL_LOGS_EXPORTER=otlp` the chat contents go to the collector.
+
+gotd's own loggers are noisier. At debug it prints whole update structs, which
+include message text, so `LOG_LEVEL=debug` already puts some chat content in
+the log regardless of `TG_LOG_PAYLOADS`. Neither is a setting to leave on in a
+deployment whose logs are shipped somewhere.
 
 ### Agent attribution
 

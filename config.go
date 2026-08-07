@@ -31,6 +31,10 @@ type Config struct {
 	BotUsername     string
 	BotAllowedUsers []int64
 
+	// LogPayloads includes MCP request and response bodies in the debug log,
+	// and therefore in any log exporter. That is the contents of chats.
+	LogPayloads bool
+
 	BlobBaseURL string
 	BlobDir     string
 	BlobTTL     time.Duration
@@ -159,6 +163,8 @@ func LoadConfig() (Config, error) {
 		}
 		cfg.BlobTTL = ttl
 	}
+
+	cfg.LogPayloads = os.Getenv("TG_LOG_PAYLOADS") == "true"
 
 	cfg.BlobS3Endpoint = os.Getenv("TG_BLOB_S3_ENDPOINT")
 	cfg.BlobS3Bucket = os.Getenv("TG_BLOB_S3_BUCKET")

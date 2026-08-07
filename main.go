@@ -203,7 +203,7 @@ func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry)
 		return err
 	}
 
-	instrument, err := newMCPInstrument(t)
+	instrument, err := newMCPInstrument(t, cfg.LogPayloads)
 	if err != nil {
 		return err
 	}

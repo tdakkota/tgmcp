@@ -42,17 +42,21 @@ var newTGMetrics = autometric.Define[tgMetrics](autometric.InitOptions{})
 type mcpInstrument struct {
 	tracer  trace.Tracer
 	metrics mcpMetrics
+	// logPayloads includes request and response bodies in the debug log, which
+	// means the contents of chats. Off unless the operator asked for it.
+	logPayloads bool
 }
 
-func newMCPInstrument(t *app.Telemetry) (*mcpInstrument, error) {
+func newMCPInstrument(t *app.Telemetry, logPayloads bool) (*mcpInstrument, error) {
 	m, err := newMCPMetrics(t.MeterProvider().Meter(instrumentName))
 	if err != nil {
 		return nil, errors.Wrap(err, "init MCP metrics")
 	}
 
 	return &mcpInstrument{
-		tracer:  t.TracerProvider().Tracer(instrumentName),
-		metrics: m,
+		tracer:      t.TracerProvider().Tracer(instrumentName),
+		metrics:     m,
+		logPayloads: logPayloads,
 	}, nil
 }
 
@@ -77,7 +81,11 @@ func (i *mcpInstrument) Middleware() mcp.Middleware {
 			ctx = zctx.With(ctx, fields...)
 			i.metrics.Requests.Add(ctx, 1, metric.WithAttributes(attrs...))
 			lg := zctx.From(ctx)
-			lg.Debug("MCP request", zap.Any("params", req.GetParams()))
+			request := []zap.Field{}
+			if i.logPayloads {
+				request = append(request, zap.Any("params", req.GetParams()))
+			}
+			lg.Debug("MCP request", request...)
 
 			start := time.Now()
 			res, err := next(ctx, method, req)
@@ -91,11 +99,13 @@ func (i *mcpInstrument) Middleware() mcp.Middleware {
 			} else {
 				span.SetStatus(codes.Ok, "")
 			}
-			lg.Debug("MCP response",
-				zap.Duration("took", took),
-				zap.Any("result", res),
-				zap.Error(err),
-			)
+			response := []zap.Field{zap.Duration("took", took), zap.Error(err)}
+			if i.logPayloads {
+				// The payload is the chat: message text, peer details and
+				// whatever else a tool returned.
+				response = append(response, zap.Any("result", res))
+			}
+			lg.Debug("MCP response", response...)
 
 			return res, err
 		}

@@ -13,14 +13,13 @@ import (
 // PeerInfo describes a resolved Telegram peer: a user, bot, group, supergroup
 // or broadcast channel.
 type PeerInfo struct {
-	Type       string `json:"type" jsonschema:"peer type: private, bot, group, supergroup or channel"`
-	ID         int64  `json:"id" jsonschema:"Telegram peer ID"`
-	AccessHash int64  `json:"access_hash,omitempty" jsonschema:"access hash, when the peer has one"`
-	Title      string `json:"title" jsonschema:"display name: full name for users, title for chats"`
-	Username   string `json:"username,omitempty" jsonschema:"public @username, if any"`
-	FirstName  string `json:"first_name,omitempty" jsonschema:"user first name"`
-	LastName   string `json:"last_name,omitempty" jsonschema:"user last name"`
-	About      string `json:"about,omitempty" jsonschema:"bio for users, description for chats"`
+	Type      string `json:"type" jsonschema:"peer type: private, bot, group, supergroup or channel"`
+	ID        int64  `json:"id" jsonschema:"Telegram peer ID"`
+	Title     string `json:"title" jsonschema:"display name: full name for users, title for chats"`
+	Username  string `json:"username,omitempty" jsonschema:"public @username, if any"`
+	FirstName string `json:"first_name,omitempty" jsonschema:"user first name"`
+	LastName  string `json:"last_name,omitempty" jsonschema:"user last name"`
+	About     string `json:"about,omitempty" jsonschema:"bio for users, description for chats"`
 
 	Bot           bool `json:"bot,omitempty" jsonschema:"true if the user is a bot"`
 	Premium       bool `json:"premium,omitempty" jsonschema:"true if the user has Telegram Premium"`
@@ -116,7 +115,6 @@ func infoFromUser(u *tg.User) PeerInfo {
 	info := PeerInfo{
 		Type:          "private",
 		ID:            u.ID,
-		AccessHash:    u.AccessHash,
 		Title:         displayName(u),
 		Username:      primaryUsername(u),
 		FirstName:     u.FirstName,
@@ -141,18 +139,16 @@ func infoFromUser(u *tg.User) PeerInfo {
 // fields that only channels.getFullChannel provides.
 func infoFromChannel(c *tg.Channel) PeerInfo {
 	username, _ := c.GetUsername()
-	accessHash, _ := c.GetAccessHash()
 	info := PeerInfo{
-		Type:       "channel",
-		ID:         c.ID,
-		AccessHash: accessHash,
-		Title:      c.Title,
-		Username:   username,
-		Broadcast:  c.Broadcast,
-		Megagroup:  c.Megagroup,
-		Verified:   c.Verified,
-		Scam:       c.Scam,
-		Fake:       c.Fake,
+		Type:      "channel",
+		ID:        c.ID,
+		Title:     c.Title,
+		Username:  username,
+		Broadcast: c.Broadcast,
+		Megagroup: c.Megagroup,
+		Verified:  c.Verified,
+		Scam:      c.Scam,
+		Fake:      c.Fake,
 	}
 	if c.Megagroup {
 		info.Type = "supergroup"
@@ -189,7 +185,7 @@ func (s *server) channelInfo(ctx context.Context, id *tg.InputChannel) (PeerInfo
 		return PeerInfo{}, errors.Wrap(err, "channels.getFullChannel")
 	}
 
-	info := PeerInfo{Type: "channel", ID: id.ChannelID, AccessHash: id.AccessHash}
+	info := PeerInfo{Type: "channel", ID: id.ChannelID}
 	for _, c := range full.Chats {
 		ch, ok := c.(*tg.Channel)
 		if !ok || ch.ID != id.ChannelID {
