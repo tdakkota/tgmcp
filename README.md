@@ -212,10 +212,22 @@ without an audio track", and is documented to *suppress*
 must stay off an animation.
 
 Beware a false positive: gotd's `GIF()` helper forces the MIME type to
-`image/gif`, and Telegram then stores mp4 bytes as a plain document. Lenient
-clients play it and it looks like a working GIF; it is not one.
+`image/gif`, and Telegram then stores mp4 bytes verbatim as a plain document.
+Lenient clients play it and it looks like a working GIF; it carries no
+`animated` attribute.
+
+What has been ruled out, by sending the **exact bytes** of a message Telegram
+already serves as an animation and getting a video back: the file, its
+encoding, the audio track, faststart, the dimensions, the MIME type, the
+filename attribute, and the thumbnail. The request matches what tdesktop
+builds in `PrepareUploadedDocument` and `ComposeSendingDocumentAttributes`.
 
 Everything else round-trips.
+
+`thumbnail_path` and `thumbnail_blob_id` attach a JPEG cover. tgmcp cannot make
+one — that would mean decoding the video — so the caller supplies it, as the
+Bot API does. It did not turn out to be what animations need, but it is what
+gives a video a preview frame.
 
 ### Agent attribution
 

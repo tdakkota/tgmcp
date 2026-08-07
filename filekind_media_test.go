@@ -37,7 +37,7 @@ func sentDocument(t *testing.T, kind fileKind, in sendFileInput) *tg.InputMediaU
 	src := uploadSource{name: "clip.mp4", mimeType: "video/mp4", release: func() {}}
 	f := &tg.InputFile{ID: 1, Parts: 1, Name: src.name}
 
-	if _, err := sender.Self().Media(t.Context(), kind.mediaOption(f, src, in, nil)); err != nil {
+	if _, err := sender.Self().Media(t.Context(), kind.mediaOption(f, nil, src, in, nil)); err != nil {
 		t.Fatalf("send: %v", err)
 	}
 	if got == nil {

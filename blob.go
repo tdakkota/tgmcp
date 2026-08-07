@@ -13,6 +13,7 @@ import (
 	"github.com/go-faster/gooners/blob/s3"
 
 	"github.com/gotd/td/telegram/message"
+	"github.com/gotd/td/tg"
 )
 
 // newS3BlobStore builds the bucket-backed store. It fails at startup rather
@@ -94,13 +95,18 @@ type uploadSource struct {
 // got from get_file, or from a server sharing the same store, and never has to
 // have a filesystem in common with this process.
 func (s *server) uploadSource(ctx context.Context, in sendFileInput) (uploadSource, error) {
-	if in.BlobID == "" {
+	return s.openSource(ctx, in.Path, in.BlobID)
+}
+
+// openSource resolves one source named by either a path or a blob id.
+func (s *server) openSource(ctx context.Context, filePath, blobID string) (uploadSource, error) {
+	if blobID == "" {
 		root := s.fileRootVal
 		if root == "" {
 			return uploadSource{}, errors.New("TG_FILE_ROOT not configured")
 		}
 
-		abs, err := safeJoin(root, in.Path)
+		abs, err := safeJoin(root, filePath)
 		if err != nil {
 			return uploadSource{}, err
 		}
@@ -117,9 +123,9 @@ func (s *server) uploadSource(ctx context.Context, in sendFileInput) (uploadSour
 
 	// The store validates the id before it becomes a key, so an id the model
 	// invented cannot name an object outside what the operator configured.
-	rc, b, err := s.blobs.Open(ctx, in.BlobID)
+	rc, b, err := s.blobs.Open(ctx, blobID)
 	if err != nil {
-		return uploadSource{}, errors.Wrapf(err, "open blob %q", in.BlobID)
+		return uploadSource{}, errors.Wrapf(err, "open blob %q", blobID)
 	}
 
 	name := b.Name
@@ -152,4 +158,30 @@ func blobMountPath(baseURL string) (string, error) {
 	}
 
 	return u.Path, nil
+}
+
+// uploadThumbnail uploads the cover image for a file, when one was given.
+//
+// tgmcp cannot make one: it would have to decode the video. The caller passes
+// a JPEG it prepared, which is also how the Bot API takes thumbnails.
+func (s *server) uploadThumbnail(ctx context.Context, b *message.RequestBuilder, in sendFileInput) (tg.InputFileClass, error) {
+	if in.ThumbnailPath == "" && in.ThumbnailBlobID == "" {
+		return nil, nil
+	}
+	if in.ThumbnailPath != "" && in.ThumbnailBlobID != "" {
+		return nil, errors.New("give either thumbnail_path or thumbnail_blob_id, not both")
+	}
+
+	src, err := s.openSource(ctx, in.ThumbnailPath, in.ThumbnailBlobID)
+	if err != nil {
+		return nil, errors.Wrap(err, "open thumbnail")
+	}
+	defer src.release()
+
+	f, err := b.Upload(src.option).AsInputFile(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "upload thumbnail")
+	}
+
+	return f, nil
 }

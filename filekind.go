@@ -89,6 +89,7 @@ func (k fileKind) named() bool {
 // shows a document with no filename as its numeric id.
 func (k fileKind) mediaOption(
 	f tg.InputFileClass,
+	thumb tg.InputFileClass,
 	src uploadSource,
 	in sendFileInput,
 	caption []styling.StyledTextOption,
@@ -98,6 +99,12 @@ func (k fileKind) mediaOption(
 	}
 
 	doc := message.UploadedDocument(f, caption...)
+	if thumb != nil {
+		// Telegram will not classify a document as an animation without one,
+		// which is the flag every real client sends and none of the schema
+		// documents as required.
+		doc = doc.Thumb(thumb)
+	}
 	if src.mimeType != "" {
 		doc = doc.MIME(src.mimeType)
 	}

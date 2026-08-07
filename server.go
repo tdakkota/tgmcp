@@ -174,6 +174,8 @@ type sendFileInput struct {
 	DurationSeconds  int    `json:"duration_seconds,omitempty" jsonschema:"duration, for video, gif, audio, voice and video_note; without it the player shows none"`
 	Width            int    `json:"width,omitempty" jsonschema:"pixel width, for video, gif and video_note"`
 	Height           int    `json:"height,omitempty" jsonschema:"pixel height, for video, gif and video_note"`
+	ThumbnailPath    string `json:"thumbnail_path,omitempty" jsonschema:"JPEG cover under TG_FILE_ROOT; Telegram needs one to treat a file as an animation"`
+	ThumbnailBlobID  string `json:"thumbnail_blob_id,omitempty" jsonschema:"stored JPEG cover, as an alternative to thumbnail_path"`
 	Title            string `json:"title,omitempty" jsonschema:"track title, for audio"`
 	Performer        string `json:"performer,omitempty" jsonschema:"track performer, for audio"`
 	ReplyToMessageID int    `json:"reply_to_message_id,omitempty" jsonschema:"reply to this message id"`
@@ -644,7 +646,12 @@ func (s *server) handleSendFile(ctx context.Context, _ *mcp.CallToolRequest, in 
 		return nil, sendFileOutput{}, errors.Wrap(err, "upload file")
 	}
 
-	upd, err := b.Media(ctx, kind.mediaOption(f, src, in, caption))
+	thumb, err := s.uploadThumbnail(ctx, b, in)
+	if err != nil {
+		return nil, sendFileOutput{}, err
+	}
+
+	upd, err := b.Media(ctx, kind.mediaOption(f, thumb, src, in, caption))
 	if err != nil {
 		return nil, sendFileOutput{}, errors.Wrap(err, "send file")
 	}
