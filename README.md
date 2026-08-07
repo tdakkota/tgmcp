@@ -165,6 +165,38 @@ Note this marks messages by convention, not by proof. tgmcp decides whether to
 apply attribution, so it is a courtesy to readers, not something that survives
 an agent that chooses to send unmarked.
 
+### File delivery
+
+`get_file` with `inline: true` returns the file in the tool result. Small text
+and images come back as content blocks; anything else is stored and returned as
+a link, so a large file never enters the model's context:
+
+```json
+{"ok": true, "url": "http://127.0.0.1:8080/blob/<id>/<name>", "expires_at": "..."}
+```
+
+The client fetches that URL itself — with `curl`, a browser, or anything else —
+and the bytes go straight to disk.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `TG_BLOB_BASE_URL` | — | Externally reachable URL the handler is served under. Unset disables storage entirely. |
+| `TG_BLOB_DIR` | `<session>/blob` | Where stored objects live. |
+| `TG_BLOB_TTL` | `15m` | How long a URL keeps working. |
+
+`TG_BLOB_BASE_URL` is separate from `MCP_ADDR` on purpose: the server listens
+where `MCP_ADDR` says and advertises what `TG_BLOB_BASE_URL` says, so it can sit
+behind a reverse proxy. It is an assertion that a client can reach the server
+there, and nothing verifies it — point it at the wrong host and every link
+404s. Behind a proxy, route only the blob path: proxying `/` would expose the
+unauthenticated MCP endpoint too.
+
+Objects do not survive a restart, and a URL is a credential — anyone holding one
+can fetch that file until it expires. Storage is backed by
+[`go-faster/gooners/blob`][blob].
+
+[blob]: https://github.com/go-faster/gooners/tree/main/blob
+
 ### Telemetry
 
 `tgmcp serve` runs under [`go-faster/sdk/app`][sdk], so it emits OpenTelemetry

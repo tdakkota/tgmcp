@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/go-faster/errors"
+	"github.com/go-faster/gooners/blob"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/zap"
 
@@ -28,6 +29,7 @@ type server struct {
 	allowSend        bool
 	allowProfileEdit bool
 	allowInlineMedia bool
+	blobs            blob.Store
 
 	// Agent attribution, see [attributionMode].
 	attribution attributionMode
@@ -215,11 +217,13 @@ type getFileInput struct {
 }
 
 type getFileOutput struct {
-	OK       bool   `json:"ok" jsonschema:"true on success"`
-	Path     string `json:"path,omitempty" jsonschema:"path written, relative to TG_FILE_ROOT; empty when inline"`
-	MimeType string `json:"mime_type,omitempty" jsonschema:"MIME type of the downloaded file, if known"`
-	Size     int64  `json:"size,omitempty" jsonschema:"size in bytes, if known"`
-	Inline   bool   `json:"inline,omitempty" jsonschema:"true if the file was returned in the tool result"`
+	OK        bool   `json:"ok" jsonschema:"true on success"`
+	Path      string `json:"path,omitempty" jsonschema:"path written, relative to TG_FILE_ROOT; empty when inline"`
+	URL       string `json:"url,omitempty" jsonschema:"URL to fetch the file from, when it was too large to return inline"`
+	ExpiresAt string `json:"expires_at,omitempty" jsonschema:"RFC3339 time the URL stops working"`
+	MimeType  string `json:"mime_type,omitempty" jsonschema:"MIME type of the downloaded file, if known"`
+	Size      int64  `json:"size,omitempty" jsonschema:"size in bytes, if known"`
+	Inline    bool   `json:"inline,omitempty" jsonschema:"true if the file was returned in the tool result"`
 }
 
 type updateProfileInput struct {

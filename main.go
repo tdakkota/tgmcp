@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,6 +22,7 @@ import (
 	"github.com/gotd/contrib/bbolt"
 	"github.com/gotd/log/logzap"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/samber/slog-zap/v2"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -206,6 +208,15 @@ func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry)
 		return err
 	}
 
+	blobs, err := newBlobStore(cfg, slog.New(slogzap.Option{Logger: lg.Named("blob")}.NewZapHandler()))
+	if err != nil {
+		return err
+	}
+	if r, ok := blobs.(interface{ Run(context.Context) }); ok {
+		// Sweeps expired objects, and drops everything on shutdown.
+		go r.Run(ctx)
+	}
+
 	return client.Run(ctx, func(ctx context.Context) error {
 		status, err := client.Auth().Status(ctx)
 		if err != nil {
@@ -233,6 +244,7 @@ func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry)
 			allowSend:        cfg.AllowSend,
 			allowProfileEdit: cfg.AllowProfileEdit,
 			allowInlineMedia: cfg.AllowInlineMedia,
+			blobs:            blobs,
 			attribution:      cfg.Attribution,
 			strict:           cfg.Strict,
 			footer:           cfg.AgentFooter,
@@ -252,9 +264,23 @@ func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry)
 		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 			return m
 		}, nil)
+
+		mux := http.NewServeMux()
+		mux.Handle("/", handler)
+		// Serve stored media alongside MCP, so a client can fetch a file the
+		// tool result only linked to.
+		if h, ok := blobs.(http.Handler); ok {
+			path, err := blobMountPath(cfg.BlobBaseURL)
+			if err != nil {
+				return err
+			}
+			mux.Handle(path, h)
+			lg.Info("Serving blobs", zap.String("path", path), zap.String("base_url", cfg.BlobBaseURL))
+		}
+
 		httpSrv := &http.Server{
 			Addr:              cfg.HTTPAddr,
-			Handler:           instrumentHTTP(lg, t, handler),
+			Handler:           instrumentHTTP(lg, t, mux),
 			ReadHeaderTimeout: 10 * time.Second,
 		}
 

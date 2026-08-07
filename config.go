@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-faster/errors"
 	"github.com/joho/godotenv"
@@ -29,6 +30,10 @@ type Config struct {
 	BotToken        string
 	BotUsername     string
 	BotAllowedUsers []int64
+
+	BlobBaseURL string
+	BlobDir     string
+	BlobTTL     time.Duration
 }
 
 // LoadConfig reads configuration from the environment, optionally sourcing a
@@ -55,6 +60,13 @@ type Config struct {
 //	TG_BOT_USERNAME       - echo bot @username; read from echobot.json when unset
 //	TG_BOT_ALLOWED_USERS  - extra user IDs allowed to claim inline payloads
 //
+// File delivery, see [newBlobStore]:
+//
+//	TG_BLOB_BASE_URL - externally reachable URL the blob handler is served under;
+//	                   unset disables it and get_file inline fails with a clear error
+//	TG_BLOB_DIR      - where stored objects live (default: <session>/blob)
+//	TG_BLOB_TTL      - how long a URL works (default: 15m)
+//
 // Telemetry is configured by the standard OTEL_* variables read by
 // [github.com/go-faster/sdk/app], see README.
 //
@@ -62,7 +74,7 @@ type Config struct {
 //
 //	TG_ALLOW_SEND         - enable send_message, send_file, send_reaction, send_chat_action, send_screenshot_notification
 //	TG_ALLOW_PROFILE_EDIT - enable update_profile, update_profile_photo
-//	TG_ALLOW_INLINE_MEDIA - allow get_file to return image bytes in the tool result instead of writing to disk
+//	TG_ALLOW_INLINE_MEDIA - allow get_file to return the file in the tool result, or a URL when it is too large
 func LoadConfig() (Config, error) {
 	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
 		return Config{}, errors.Wrap(err, "load .env")
@@ -125,6 +137,21 @@ func LoadConfig() (Config, error) {
 		return Config{}, errors.Wrap(err, "parse TG_BOT_ALLOWED_USERS")
 	}
 	cfg.BotAllowedUsers = allowed
+
+	cfg.BlobBaseURL = strings.TrimSuffix(os.Getenv("TG_BLOB_BASE_URL"), "/")
+
+	cfg.BlobDir = os.Getenv("TG_BLOB_DIR")
+	if cfg.BlobDir == "" {
+		cfg.BlobDir = filepath.Join(cfg.SessionDir, "blob")
+	}
+
+	if v := os.Getenv("TG_BLOB_TTL"); v != "" {
+		ttl, err := time.ParseDuration(v)
+		if err != nil {
+			return Config{}, errors.Wrap(err, "parse TG_BLOB_TTL")
+		}
+		cfg.BlobTTL = ttl
+	}
 
 	if cfg.Attribution == attributionBot && cfg.BotToken == "" && cfg.BotUsername == "" {
 		return Config{}, errors.New("TG_ATTRIBUTION=bot requires TG_BOT_TOKEN or TG_BOT_USERNAME")
