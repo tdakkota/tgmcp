@@ -93,7 +93,7 @@ func (c *dialogCache) unread() []UnreadChannel {
 
 	var out []UnreadChannel
 	for _, ch := range c.channels {
-		if !ch.Broadcast {
+		if !ch.broadcast() {
 			continue
 		}
 		if ch.UnreadCount > 0 || ch.UnreadMark {

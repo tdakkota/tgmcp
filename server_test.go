@@ -175,9 +175,9 @@ func TestRebuildPeerPersistence(t *testing.T) {
 func TestListChatsQuery(t *testing.T) {
 	cache := newDialogCache(nil, zap.NewNop())
 	cache.replaceAll([]UnreadChannel{
-		{ID: 1, Title: "Go Nuts", Username: "golang", Type: "supergroup", Megagroup: true, peer: &tg.InputPeerChannel{ChannelID: 1}},
+		{ID: 1, Title: "Go Nuts", Username: "golang", Type: "supergroup", peer: &tg.InputPeerChannel{ChannelID: 1}},
 		{ID: 2, Title: "Anna Smith", Type: "private", UnreadCount: 3, peer: &tg.InputPeerUser{UserID: 2}},
-		{ID: 3, Title: "Daily News", Username: "news", Type: "channel", Broadcast: true, peer: &tg.InputPeerChannel{ChannelID: 3}},
+		{ID: 3, Title: "Daily News", Username: "news", Type: "channel", peer: &tg.InputPeerChannel{ChannelID: 3}},
 	})
 	srv := &server{cache: cache}
 
@@ -218,7 +218,7 @@ func TestListChatsQuery(t *testing.T) {
 func TestMarkReadPeer(t *testing.T) {
 	cache := newDialogCache(nil, zap.NewNop())
 	cache.replaceAll([]UnreadChannel{
-		{ID: 1, Title: "chan", UnreadCount: 5, Broadcast: true, Type: "channel", peer: &tg.InputPeerChannel{ChannelID: 1}},
+		{ID: 1, Title: "chan", UnreadCount: 5, Type: "channel", peer: &tg.InputPeerChannel{ChannelID: 1}},
 		{ID: 2, Title: "user", UnreadCount: 7, UnreadMark: true, Type: "private", peer: &tg.InputPeerUser{UserID: 2}},
 		{ID: 3, Title: "group", UnreadCount: 9, Type: "group", peer: &tg.InputPeerChat{ChatID: 3}},
 	})

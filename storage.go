@@ -140,21 +140,18 @@ func toStored(ch UnreadChannel) storedDialog {
 	case *tg.InputPeerChannel:
 		accessHash = p.AccessHash
 		if typ == "" {
-			typ = "channel"
-			if ch.Megagroup {
-				typ = "supergroup"
-			}
+			typ = typeChannel
 		}
 	case *tg.InputPeerUser:
 		accessHash = p.AccessHash
 		isUser = true
 		if typ == "" {
-			typ = "private"
+			typ = typePrivate
 		}
 	case *tg.InputPeerChat:
 		isChat = true
 		if typ == "" {
-			typ = "group"
+			typ = typeGroup
 		}
 	}
 
@@ -165,8 +162,8 @@ func toStored(ch UnreadChannel) storedDialog {
 		Type:           typ,
 		UnreadCount:    ch.UnreadCount,
 		UnreadMark:     ch.UnreadMark,
-		Broadcast:      ch.Broadcast,
-		Megagroup:      ch.Megagroup,
+		Broadcast:      typ == typeChannel,
+		Megagroup:      typ == typeSupergroup,
 		ReadInboxMaxID: ch.readInboxMaxID,
 		AccessHash:     accessHash,
 		IsUser:         isUser,
@@ -181,19 +178,20 @@ func (s storedDialog) toChannel() UnreadChannel {
 	case s.IsUser:
 		peer = &tg.InputPeerUser{UserID: s.ID, AccessHash: s.AccessHash}
 		if typ == "" {
-			typ = "private"
+			typ = typePrivate
 		}
 	case s.IsChat:
 		peer = &tg.InputPeerChat{ChatID: s.ID}
 		if typ == "" {
-			typ = "group"
+			typ = typeGroup
 		}
 	default:
 		peer = &tg.InputPeerChannel{ChannelID: s.ID, AccessHash: s.AccessHash}
 		if typ == "" {
-			typ = "channel"
+			// Written before Type existed: the bools are all there is.
+			typ = typeChannel
 			if s.Megagroup {
-				typ = "supergroup"
+				typ = typeSupergroup
 			}
 		}
 	}
@@ -204,8 +202,6 @@ func (s storedDialog) toChannel() UnreadChannel {
 		Username:       s.Username,
 		UnreadCount:    s.UnreadCount,
 		UnreadMark:     s.UnreadMark,
-		Broadcast:      s.Broadcast,
-		Megagroup:      s.Megagroup,
 		Type:           typ,
 		readInboxMaxID: s.ReadInboxMaxID,
 		peer:           peer,

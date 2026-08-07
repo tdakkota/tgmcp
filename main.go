@@ -238,6 +238,7 @@ func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry)
 		srv := &server{
 			api:              client.API(),
 			cache:            cache,
+			resolved:         newResolvedPeers(),
 			msgs:             msgs,
 			lg:               lg,
 			fileRootVal:      cfg.FileRoot,

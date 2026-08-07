@@ -21,8 +21,11 @@ import (
 
 // server holds the dependencies shared by the MCP tool handlers.
 type server struct {
-	api              *tg.Client
-	cache            *dialogCache
+	api   *tg.Client
+	cache *dialogCache
+	// resolved holds chat metadata learned while resolving a target, for
+	// dialogs the cache does not have, see [resolvedPeers].
+	resolved         *resolvedPeers
 	msgs             *messageStore
 	lg               *zap.Logger
 	fileRootVal      string
@@ -395,7 +398,7 @@ func (s *server) handleReadChannel(ctx context.Context, _ *mcp.CallToolRequest, 
 	if err != nil {
 		return nil, readChannelOutput{}, err
 	}
-	if !ch.Broadcast {
+	if !ch.broadcast() {
 		return nil, readChannelOutput{}, errors.Errorf("channel %q is not a broadcast channel", in.Channel)
 	}
 	return nil, readChannelOutput{Channel: ch, Messages: msgs}, nil
@@ -439,7 +442,7 @@ func (s *server) handleListChats(_ context.Context, _ *mcp.CallToolRequest, in l
 		typ := strings.ToLower(in.Type)
 		var f []UnreadChannel
 		for _, c := range all {
-			if strings.EqualFold(c.Type, typ) || (typ == "channel" && c.Broadcast) || (typ == "supergroup" && c.Megagroup) {
+			if strings.EqualFold(c.Type, typ) {
 				f = append(f, c)
 			}
 		}
@@ -777,25 +780,40 @@ func sendChatAction(ctx context.Context, b *message.TypingActionBuilder, action 
 func (s *server) peerToChannel(p tg.InputPeerClass) UnreadChannel {
 	switch v := p.(type) {
 	case *tg.InputPeerSelf:
-		return UnreadChannel{ID: 0, Title: "me", Type: "private", peer: v}
+		return UnreadChannel{ID: 0, Title: "me", Type: typePrivate, peer: v}
 	case *tg.InputPeerUser:
-		if ch, ok := s.cache.getPeer(v); ok {
+		if ch, ok := s.peerKnown(v, v.UserID); ok {
 			return ch
 		}
-		return UnreadChannel{ID: v.UserID, Type: "private", peer: v}
+
+		return UnreadChannel{ID: v.UserID, Type: typePrivate, peer: v}
 	case *tg.InputPeerChat:
-		if ch, ok := s.cache.getPeer(v); ok {
+		if ch, ok := s.peerKnown(v, v.ChatID); ok {
 			return ch
 		}
-		return UnreadChannel{ID: v.ChatID, Type: "group", peer: v}
+
+		return UnreadChannel{ID: v.ChatID, Type: typeGroup, peer: v}
 	case *tg.InputPeerChannel:
-		if ch, ok := s.cache.getPeer(v); ok {
+		if ch, ok := s.peerKnown(v, v.ChannelID); ok {
 			return ch
 		}
+
+		// Type is left empty rather than guessed: an input peer says a channel
+		// is a channel, not whether it broadcasts.
 		return UnreadChannel{ID: v.ChannelID, peer: v}
 	default:
 		return UnreadChannel{peer: p}
 	}
+}
+
+// peerKnown looks a dialog up in the cache, then in what resolving a target
+// has already revealed.
+func (s *server) peerKnown(p tg.InputPeerClass, id int64) (UnreadChannel, bool) {
+	if ch, ok := s.cache.getPeer(p); ok {
+		return ch, true
+	}
+
+	return s.resolved.get(id)
 }
 
 // safeJoin ensures p is inside root (no traversal). Accepts relative and
