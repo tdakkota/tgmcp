@@ -206,8 +206,16 @@ an ordinary video. What is known:
 - It is not the file. Re-uploading the exact bytes of a message Telegram
   already serves as an animation still comes back as a video.
 
-The one difference left untested is the thumbnail, which tdlib uploads
-alongside both. Everything else round-trips.
+`nosound_video` is not the flag it sounds like: it means "send as a video even
+without an audio track", and is documented to *suppress*
+`documentAttributeAnimated`. It belongs on a video note, which tdlib sets, and
+must stay off an animation.
+
+Beware a false positive: gotd's `GIF()` helper forces the MIME type to
+`image/gif`, and Telegram then stores mp4 bytes as a plain document. Lenient
+clients play it and it looks like a working GIF; it is not one.
+
+Everything else round-trips.
 
 ### Agent attribution
 

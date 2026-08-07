@@ -81,15 +81,15 @@ func TestFileKindAttributes(t *testing.T) {
 		}
 	})
 
-	// tdlib sends an animation as a plain mp4 document and lets the server
-	// classify it from the missing audio track, see AnimationsManager.
-	t.Run("gif matches what tdlib sends", func(t *testing.T) {
+	t.Run("gif is animated and not nosound", func(t *testing.T) {
 		doc := sentDocument(t, fileKindGIF, in)
-		if hasAttr[*tg.DocumentAttributeAnimated](doc) {
-			t.Error("gif: tdlib sends no animated attribute")
+		if !hasAttr[*tg.DocumentAttributeAnimated](doc) {
+			t.Error("gif: want the animated attribute, as tdesktop sends")
 		}
+		// nosound_video means "send as a video even without audio", and is
+		// documented to suppress documentAttributeAnimated when set.
 		if doc.NosoundVideo {
-			t.Error("gif: tdlib leaves nosound_video unset")
+			t.Error("gif: nosound_video suppresses the animation")
 		}
 		// gotd's GIF() helper forces image/gif, under which an mp4 is an
 		// unreadable document.

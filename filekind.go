@@ -116,14 +116,14 @@ func (k fileKind) mediaOption(
 		// downgrades the round message to an ordinary video.
 		return video(doc.NosoundVideo(true).RoundVideo(), in).Round()
 	case fileKindGIF:
-		// An animation is a plain mp4 document, which is what tdlib sends:
-		// no animated attribute, no nosound flag, no streaming. The server
-		// makes it an animation because the file carries no audio track, so
-		// the caller has to supply one that does not.
+		// An animation is a soundless mp4. nosound_video must stay unset: it
+		// means "send as a video even without audio", and setting it is
+		// documented to suppress the animated attribute outright.
 		//
 		// Not [message.UploadedDocumentBuilder.GIF] either: that forces the
-		// MIME type to image/gif, under which an mp4 is unreadable.
-		return video(doc.Video(), in)
+		// MIME type to image/gif, under which an mp4 is unreadable — Telegram
+		// stores it as a plain document that lenient clients still play.
+		return video(doc.Attributes(&tg.DocumentAttributeAnimated{}).Video(), in)
 	case fileKindAudio:
 		return audio(doc.Audio(), in)
 	case fileKindVoice:
