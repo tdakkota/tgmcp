@@ -41,7 +41,7 @@ func TestBlobMountPath(t *testing.T) {
 // TestNewBlobStoreDenies checks that an unconfigured base URL yields a store
 // that fails loudly, rather than one handing out URLs that resolve nowhere.
 func TestNewBlobStoreDenies(t *testing.T) {
-	s, err := newBlobStore(Config{}, nil)
+	s, err := newBlobStore(t.Context(), Config{}, nil)
 	if err != nil {
 		t.Fatalf("newBlobStore: %v", err)
 	}

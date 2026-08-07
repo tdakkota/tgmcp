@@ -93,6 +93,7 @@ func (s *server) inlineMedia(ctx context.Context, loc tg.InputFileLocationClass,
 		// Stored rather than inlined: report where it can be fetched.
 		out.Inline = false
 		out.URL = b.URL
+		out.BlobID = b.ID
 		out.Size = b.Size
 		out.MimeType = b.MIMEType
 		out.ExpiresAt = b.ExpiresAt.UTC().Format(time.RFC3339)

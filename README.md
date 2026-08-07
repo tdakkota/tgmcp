@@ -218,17 +218,46 @@ and images come back as content blocks; anything else is stored and returned as
 a link, so a large file never enters the model's context:
 
 ```json
-{"ok": true, "url": "http://127.0.0.1:8080/blob/<id>/<name>", "expires_at": "..."}
+{"ok": true, "url": "http://127.0.0.1:8080/blob/<id>/<name>", "blob_id": "tgmcp/<uuid>", "expires_at": "..."}
 ```
 
 The client fetches that URL itself — with `curl`, a browser, or anything else —
 and the bytes go straight to disk.
 
+Storage comes in two shapes. **A bucket** (`TG_BLOB_S3_*`) is the one to reach
+for when the agent cannot open a connection to this process, or when several
+MCP servers should share one store. Otherwise tgmcp **serves the bytes itself**
+over its own HTTP listener (`TG_BLOB_BASE_URL`), which is the simple local case.
+Configuring a bucket takes precedence; configuring neither disables storage, and
+`get_file` then says so instead of minting a URL that resolves nowhere.
+
 | Variable | Default | Description |
 | --- | --- | --- |
-| `TG_BLOB_BASE_URL` | — | Externally reachable URL the handler is served under. Unset disables storage entirely. |
-| `TG_BLOB_DIR` | `<session>/blob` | Where stored objects live. |
+| `TG_BLOB_S3_ENDPOINT` | — | S3 endpoint, `host[:port]` or an `http(s)://` URL. A bare host means https. |
+| `TG_BLOB_S3_BUCKET` | — | Bucket holding the objects. It must already exist. |
+| `TG_BLOB_S3_PREFIX` | — | Key root, and the tenancy boundary. Give each user their own, e.g. `tenants/alice`. |
+| `TG_BLOB_S3_REGION` | — | Bucket region. Optional for MinIO and endpoints that encode it. |
+| `TG_BLOB_BASE_URL` | — | Externally reachable URL the handler is served under, when not using a bucket. |
+| `TG_BLOB_DIR` | `<session>/blob` | Where locally stored objects live. |
 | `TG_BLOB_TTL` | `15m` | How long a URL keeps working. |
+
+Bucket credentials are **not** tgmcp settings. They come from the ambient chain
+— the AWS and MinIO environment variables, then the shared credentials file — so
+they never pass through this program's configuration or its logs. On an instance
+role there is nothing to set here either; the instance metadata service is
+deliberately not in that chain.
+
+Two things about a bucket-backed store are worth knowing before turning it on.
+A presigned URL **is** a credential, so `TG_BLOB_TTL` is what limits the damage
+of one leaking into a transcript. And objects are not swept: `expires_at` is
+when the URL stops working, not when the bytes go away. Set a bucket lifecycle
+rule — nothing in tgmcp will delete them for you, because a sweep would have to
+list a bucket every other server is sharing.
+
+`blob_id` is the other half of the pair. It names the object rather than
+granting access to it, it does not expire, and another MCP server pointed at the
+same bucket can read it directly. That is how one server's output becomes
+another's input without either fetching a URL the model chose.
 
 `TG_BLOB_BASE_URL` is separate from `MCP_ADDR` on purpose: the server listens
 where `MCP_ADDR` says and advertises what `TG_BLOB_BASE_URL` says, so it can sit

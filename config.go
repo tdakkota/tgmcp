@@ -34,6 +34,13 @@ type Config struct {
 	BlobBaseURL string
 	BlobDir     string
 	BlobTTL     time.Duration
+
+	// S3-backed blob storage, which replaces the local HTTP store when
+	// endpoint and bucket are both set.
+	BlobS3Endpoint string
+	BlobS3Bucket   string
+	BlobS3Prefix   string
+	BlobS3Region   string
 }
 
 // LoadConfig reads configuration from the environment, optionally sourcing a
@@ -151,6 +158,17 @@ func LoadConfig() (Config, error) {
 			return Config{}, errors.Wrap(err, "parse TG_BLOB_TTL")
 		}
 		cfg.BlobTTL = ttl
+	}
+
+	cfg.BlobS3Endpoint = os.Getenv("TG_BLOB_S3_ENDPOINT")
+	cfg.BlobS3Bucket = os.Getenv("TG_BLOB_S3_BUCKET")
+	cfg.BlobS3Prefix = os.Getenv("TG_BLOB_S3_PREFIX")
+	cfg.BlobS3Region = os.Getenv("TG_BLOB_S3_REGION")
+
+	// Half a bucket configuration is a mistake, not a fallback: silently
+	// serving over local HTTP instead would hand out URLs nothing can reach.
+	if (cfg.BlobS3Endpoint == "") != (cfg.BlobS3Bucket == "") {
+		return Config{}, errors.New("TG_BLOB_S3_ENDPOINT and TG_BLOB_S3_BUCKET must be set together")
 	}
 
 	if cfg.Attribution == attributionBot && cfg.BotToken == "" && cfg.BotUsername == "" {

@@ -47,3 +47,34 @@ func TestLoadConfigRightsAreOptIn(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadConfigS3IsAllOrNothing checks that half a bucket configuration is
+// rejected. Falling back to the local HTTP store instead would hand out URLs
+// nothing can reach.
+func TestLoadConfigS3IsAllOrNothing(t *testing.T) {
+	for _, tt := range []struct {
+		name             string
+		endpoint, bucket string
+		wantErr          bool
+	}{
+		{name: "neither"},
+		{name: "both", endpoint: "s3.example.com", bucket: "blobs"},
+		{name: "endpoint only", endpoint: "s3.example.com", wantErr: true},
+		{name: "bucket only", bucket: "blobs", wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("APP_ID", "1")
+			t.Setenv("APP_HASH", "hash")
+			t.Setenv("TG_BLOB_S3_ENDPOINT", tt.endpoint)
+			t.Setenv("TG_BLOB_S3_BUCKET", tt.bucket)
+
+			_, err := LoadConfig()
+			if tt.wantErr && err == nil {
+				t.Fatal("LoadConfig: want error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("LoadConfig: %v", err)
+			}
+		})
+	}
+}

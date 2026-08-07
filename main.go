@@ -208,7 +208,7 @@ func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry)
 		return err
 	}
 
-	blobs, err := newBlobStore(cfg, slog.New(slogzap.Option{Logger: lg.Named("blob")}.NewZapHandler()))
+	blobs, err := newBlobStore(ctx, cfg, slog.New(slogzap.Option{Logger: lg.Named("blob")}.NewZapHandler()))
 	if err != nil {
 		return err
 	}
