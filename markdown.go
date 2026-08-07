@@ -36,17 +36,25 @@ func (s *server) styledText(text, mode string) (styling.StyledTextOption, error)
 // resolver may be nil, in which case mentions are built from the user ID
 // alone. That is enough for a bot session but not for a user one.
 func styledText(text, mode string, resolver func(id int64) (tg.InputUserClass, error)) (styling.StyledTextOption, error) {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
+	switch normalizeMode(mode) {
 	case "", parseModePlain:
 		return styling.Plain(text), nil
 	case parseModeMarkdown:
 		return markdown.String(resolver, text), nil
 	case parseModeHTML:
 		return html.String(resolver, text), nil
+	case parseModeRichMarkdown, parseModeRichHTML:
+		return styling.StyledTextOption{}, errors.Errorf(
+			"parse_mode %q builds a rich message, which only send_message and edit_message can send", mode)
 	default:
 		return styling.StyledTextOption{}, errors.Errorf("unknown parse_mode %q, want %q, %q or %q",
 			mode, parseModePlain, parseModeMarkdown, parseModeHTML)
 	}
+}
+
+// normalizeMode canonicalizes a parse_mode value from a tool argument.
+func normalizeMode(mode string) string {
+	return strings.ToLower(strings.TrimSpace(mode))
 }
 
 // resolveUser resolves the user ID of a "tg://user?id=N" Markdown mention.

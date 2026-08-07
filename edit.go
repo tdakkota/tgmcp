@@ -13,7 +13,7 @@ type editMessageInput struct {
 	Chat      string `json:"chat" jsonschema:"chat target"`
 	MessageID int    `json:"message_id" jsonschema:"id of the message to edit; it must be one you sent"`
 	Text      string `json:"text" jsonschema:"new text, or new caption for a media message"`
-	ParseMode string `json:"parse_mode,omitempty" jsonschema:"text format: plain (default, sent as-is), markdown or html"`
+	ParseMode string `json:"parse_mode,omitempty" jsonschema:"text format: plain (default, sent as-is), markdown, html, rich_markdown or rich_html"`
 	NoWebpage bool   `json:"no_webpage,omitempty" jsonschema:"disable link preview"`
 }
 
@@ -36,17 +36,30 @@ func (s *server) handleEditMessage(ctx context.Context, _ *mcp.CallToolRequest, 
 		return nil, editMessageOutput{}, err
 	}
 
-	body, attribution, err := s.messageOptions(in.Text, in.ParseMode)
-	if err != nil {
-		return nil, editMessageOutput{}, err
-	}
-
 	b := message.NewSender(s.api).To(p)
 	if in.NoWebpage {
 		b.NoWebpage()
 	}
-	if _, err := b.Edit(in.MessageID).StyledText(ctx, body...); err != nil {
-		return nil, editMessageOutput{}, errors.Wrap(err, "edit message")
+
+	var attribution attributionMode
+	if isRichMode(in.ParseMode) {
+		src, mode, err := s.richMessage(in.Text, in.ParseMode)
+		if err != nil {
+			return nil, editMessageOutput{}, err
+		}
+		attribution = mode
+		if _, err := b.Edit(in.MessageID).RichMessage(ctx, src); err != nil {
+			return nil, editMessageOutput{}, errors.Wrap(err, "edit rich message")
+		}
+	} else {
+		body, mode, err := s.messageOptions(in.Text, in.ParseMode)
+		if err != nil {
+			return nil, editMessageOutput{}, err
+		}
+		attribution = mode
+		if _, err := b.Edit(in.MessageID).StyledText(ctx, body...); err != nil {
+			return nil, editMessageOutput{}, errors.Wrap(err, "edit message")
+		}
 	}
 
 	return nil, editMessageOutput{

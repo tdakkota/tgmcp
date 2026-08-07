@@ -103,12 +103,14 @@ server is read-only.
 | `plain` (default) | Text is sent verbatim; Markdown syntax stays literal. |
 | `markdown` | CommonMark is parsed into Telegram message entities. |
 | `html` | The Bot API HTML subset (`<b>`, `<i>`, `<a href>`, `<code>`, `<pre>`, ...). |
+| `rich_markdown` | Markdown becomes a **rich message**: page blocks, not entities. |
+| `rich_html` | Same, from HTML. |
 
 Under `markdown`, `**bold**`, `_italic_`, `~~strike~~`, `` `code` ``, fenced code
 blocks, `[links](url)`, `> quotes`, `tg://user?id=N` mentions and custom emoji
-become entities. Headings, lists and tables have no Telegram equivalent and are
+become entities. Headings, lists and tables have no *entity* equivalent and are
 sent as plain text with their markers intact — `# Heading` arrives as
-`# Heading`, not as bold.
+`# Heading`, not as bold. Use a rich mode when you need those.
 
 Mentions need the target's access hash, so `tg://user?id=N` only works for users
 already in the dialog cache; anyone else fails the call rather than sending a
@@ -117,12 +119,37 @@ broken mention.
 The default stays `plain` on purpose: flipping it would silently reformat
 messages containing `_` or `*`, which is common in log lines and identifiers.
 
+### Rich messages
+
+A rich message carries **page blocks** instead of a flat string with entities:
+headings, ordered and unordered lists, checklists, tables, block math, code
+blocks and quotes. It is the same block model as Instant View, delivered inline
+in the message, and it is how a table gets into a chat — there is no table
+entity.
+
+`send_message` and `edit_message` accept `rich_markdown` and `rich_html`. The
+source is handed to Telegram, which parses it: gotd can parse locally, but
+documents that as best-effort, and the server is what the official clients use.
+
+Reading works in the other direction. A rich message leaves `message` empty, so
+tgmcp renders its blocks back to Markdown into `text` and sets `rich: true` —
+without that, such a message reads as blank. The rendering is lossy on purpose:
+it is meant to be read, and blocks with no textual form (photos, embeds, maps)
+become a bracketed placeholder. `truncated: true` means Telegram delivered only
+part of the content.
+
 `preview_format` renders the same pipeline without sending anything, so markup
 can be checked — and a markup error caught — before it reaches a chat. It
 returns the text Telegram will display, the entities with the substring each
 one covers, and the length in UTF-16 units, the unit Telegram limits (4096 for
 a message, 1024 for a caption). The agent footer is included when
 `TG_ATTRIBUTION=footer`, so the preview is the whole message, not just the body.
+
+For a rich mode it returns the block outline instead — `table, rows: 3,
+columns: 2` — which answers the question that actually matters: did the table
+parse as a table, or as a paragraph of pipes. That preview is parsed locally,
+so it carries a `note` saying so; the server may differ on media, footnotes and
+maps.
 
 ### Agent attribution
 
@@ -169,7 +196,10 @@ If the echo bot is down, or the chat forbids inline bots,
 footer. `send_message` and `send_file` return the attribution actually applied
 in their `attribution` field, so the calling agent can tell what happened.
 
-Uploads always use the footer: an inline result cannot carry a local file.
+Uploads always use the footer: an inline result cannot carry a local file. Rich
+messages likewise, and their footer is appended to the source in its own syntax
+(`_footer_`, or `<p><i>footer</i></p>`) so that it becomes a block like any
+other.
 
 Note this marks messages by convention, not by proof. tgmcp decides whether to
 apply attribution, so it is a courtesy to readers, not something that survives

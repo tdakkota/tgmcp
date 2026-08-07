@@ -152,7 +152,7 @@ type searchChatMessagesOutput struct {
 type sendMessageInput struct {
 	Chat             string `json:"chat" jsonschema:"chat target"`
 	Text             string `json:"text" jsonschema:"message text"`
-	ParseMode        string `json:"parse_mode,omitempty" jsonschema:"text format: plain (default, sent as-is), markdown or html"`
+	ParseMode        string `json:"parse_mode,omitempty" jsonschema:"text format: plain (default, sent as-is), markdown, html, rich_markdown or rich_html"`
 	ReplyToMessageID int    `json:"reply_to_message_id,omitempty" jsonschema:"reply to this message id"`
 	Silent           bool   `json:"silent,omitempty" jsonschema:"send without notification"`
 	NoWebpage        bool   `json:"no_webpage,omitempty" jsonschema:"disable link preview"`
@@ -304,17 +304,17 @@ func (s *server) register(m *mcp.Server) {
 	if s.allowSend {
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "preview_format",
-			Description: "Render text with a parse_mode without sending it: returns the text Telegram will display, the formatting entities and the length. Use it to check markup, and to catch a markup error, before posting.",
+			Description: "Render text with a parse_mode without sending it: returns the text Telegram will display, the formatting entities and the length, or the block outline for a rich message. Use it to check markup, and to catch a markup error, before posting.",
 		}, s.handlePreviewFormat)
 
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "send_message",
-			Description: "Send text message to a chat. Supports parse_mode (plain, markdown or html), reply_to_message_id, silent, no_webpage.",
+			Description: "Send text message to a chat. Supports parse_mode (plain, markdown, html, or rich_markdown/rich_html for a rich message with headings, lists and tables), reply_to_message_id, silent, no_webpage.",
 		}, s.handleSendMessage)
 
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "edit_message",
-			Description: "Replace the text, or the media caption, of a message you sent. Supports parse_mode (plain, markdown or html) and no_webpage.",
+			Description: "Replace the text, or the media caption, of a message you sent. Supports parse_mode (plain, markdown, html, rich_markdown, rich_html) and no_webpage.",
 		}, s.handleEditMessage)
 
 		mcp.AddTool(m, &mcp.Tool{

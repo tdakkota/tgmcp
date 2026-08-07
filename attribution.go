@@ -97,6 +97,9 @@ func (s *server) styledCaption(text, mode string) ([]styling.StyledTextOption, a
 // process being reachable: when it is not, a strict configuration fails the
 // call and a lenient one falls back to the footer.
 func (s *server) sendText(ctx context.Context, p tg.InputPeerClass, in sendMessageInput) (tg.UpdatesClass, attributionMode, error) {
+	if isRichMode(in.ParseMode) {
+		return s.sendRich(ctx, p, in)
+	}
 	if s.attribution == attributionBot {
 		upd, err := s.sendViaBot(ctx, p, in)
 		if err == nil {

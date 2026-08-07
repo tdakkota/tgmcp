@@ -44,6 +44,10 @@ func TestStyledTextMode(t *testing.T) {
 		{name: "uppercase", mode: "Markdown"},
 		{name: "padded", mode: "  markdown "},
 		{name: "html", mode: "html"},
+		// Rich modes are valid parse modes, but not for styled text: they
+		// build page blocks, which only a rich message can carry.
+		{name: "rich markdown", mode: "rich_markdown", wantErr: true},
+		{name: "rich html", mode: "rich_html", wantErr: true},
 		{name: "unknown", mode: "bbcode", wantErr: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
