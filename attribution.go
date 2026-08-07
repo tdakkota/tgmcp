@@ -56,6 +56,24 @@ func footerOptions(body styling.StyledTextOption, footer string) []styling.Style
 	}
 }
 
+// messageOptions renders a message body and reports which attribution it
+// carries. Only [attributionFooter] changes the text: under [attributionBot]
+// the mark is the "via @bot" header Telegram renders on the message itself.
+func (s *server) messageOptions(text, mode string) ([]styling.StyledTextOption, attributionMode, error) {
+	body, err := s.styledText(text, mode)
+	if err != nil {
+		return nil, "", err
+	}
+	switch s.attribution {
+	case attributionFooter:
+		return footerOptions(body, s.footer), attributionFooter, nil
+	case attributionBot:
+		return []styling.StyledTextOption{body}, attributionBot, nil
+	default:
+		return []styling.StyledTextOption{body}, attributionOff, nil
+	}
+}
+
 // styledCaption renders a media caption and reports which attribution was
 // applied. Uploads cannot go through the echo bot, since the inline result
 // would have to carry the file, so [attributionBot] degrades to the footer

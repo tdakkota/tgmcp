@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-faster/errors"
 
+	"github.com/gotd/td/telegram/message/html"
 	"github.com/gotd/td/telegram/message/markdown"
 	"github.com/gotd/td/telegram/message/styling"
 	"github.com/gotd/td/tg"
@@ -14,6 +15,7 @@ import (
 const (
 	parseModePlain    = "plain"
 	parseModeMarkdown = "markdown"
+	parseModeHTML     = "html"
 )
 
 // styledText renders text according to mode.
@@ -22,6 +24,8 @@ const (
 // strikethrough, inline and fenced code, links, blockquotes, mentions and
 // custom emoji become Telegram entities. Headings, lists and tables have no
 // entity equivalent and are kept as plain text, markers included.
+//
+// HTML is the Bot API subset as parsed by [html.String].
 func (s *server) styledText(text, mode string) (styling.StyledTextOption, error) {
 	return styledText(text, mode, s.resolveUser)
 }
@@ -37,9 +41,11 @@ func styledText(text, mode string, resolver func(id int64) (tg.InputUserClass, e
 		return styling.Plain(text), nil
 	case parseModeMarkdown:
 		return markdown.String(resolver, text), nil
+	case parseModeHTML:
+		return html.String(resolver, text), nil
 	default:
-		return styling.StyledTextOption{}, errors.Errorf("unknown parse_mode %q, want %q or %q",
-			mode, parseModePlain, parseModeMarkdown)
+		return styling.StyledTextOption{}, errors.Errorf("unknown parse_mode %q, want %q, %q or %q",
+			mode, parseModePlain, parseModeMarkdown, parseModeHTML)
 	}
 }
 

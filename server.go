@@ -152,7 +152,7 @@ type searchChatMessagesOutput struct {
 type sendMessageInput struct {
 	Chat             string `json:"chat" jsonschema:"chat target"`
 	Text             string `json:"text" jsonschema:"message text"`
-	ParseMode        string `json:"parse_mode,omitempty" jsonschema:"text format: plain (default, sent as-is) or markdown"`
+	ParseMode        string `json:"parse_mode,omitempty" jsonschema:"text format: plain (default, sent as-is), markdown or html"`
 	ReplyToMessageID int    `json:"reply_to_message_id,omitempty" jsonschema:"reply to this message id"`
 	Silent           bool   `json:"silent,omitempty" jsonschema:"send without notification"`
 	NoWebpage        bool   `json:"no_webpage,omitempty" jsonschema:"disable link preview"`
@@ -168,7 +168,7 @@ type sendFileInput struct {
 	Chat             string `json:"chat" jsonschema:"chat target"`
 	Path             string `json:"path" jsonschema:"path relative to TG_FILE_ROOT or absolute inside it"`
 	Caption          string `json:"caption,omitempty" jsonschema:"optional caption"`
-	ParseMode        string `json:"parse_mode,omitempty" jsonschema:"caption format: plain (default, sent as-is) or markdown"`
+	ParseMode        string `json:"parse_mode,omitempty" jsonschema:"caption format: plain (default, sent as-is), markdown or html"`
 	AsPhoto          bool   `json:"as_photo,omitempty" jsonschema:"send as photo if true"`
 	ReplyToMessageID int    `json:"reply_to_message_id,omitempty" jsonschema:"reply to this message id"`
 	Silent           bool   `json:"silent,omitempty" jsonschema:"send without notification"`
@@ -303,13 +303,23 @@ func (s *server) register(m *mcp.Server) {
 
 	if s.allowSend {
 		mcp.AddTool(m, &mcp.Tool{
+			Name:        "preview_format",
+			Description: "Render text with a parse_mode without sending it: returns the text Telegram will display, the formatting entities and the length. Use it to check markup, and to catch a markup error, before posting.",
+		}, s.handlePreviewFormat)
+
+		mcp.AddTool(m, &mcp.Tool{
 			Name:        "send_message",
-			Description: "Send text message to a chat. Supports parse_mode (plain or markdown), reply_to_message_id, silent, no_webpage.",
+			Description: "Send text message to a chat. Supports parse_mode (plain, markdown or html), reply_to_message_id, silent, no_webpage.",
 		}, s.handleSendMessage)
 
 		mcp.AddTool(m, &mcp.Tool{
+			Name:        "edit_message",
+			Description: "Replace the text, or the media caption, of a message you sent. Supports parse_mode (plain, markdown or html) and no_webpage.",
+		}, s.handleEditMessage)
+
+		mcp.AddTool(m, &mcp.Tool{
 			Name:        "send_file",
-			Description: "Send file from configured TG_FILE_ROOT. Supports caption with parse_mode (plain or markdown), as_photo, reply_to_message_id, silent.",
+			Description: "Send file from configured TG_FILE_ROOT. Supports caption with parse_mode (plain, markdown or html), as_photo, reply_to_message_id, silent.",
 		}, s.handleSendFile)
 
 		mcp.AddTool(m, &mcp.Tool{

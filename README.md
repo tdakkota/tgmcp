@@ -25,7 +25,9 @@ and unread state as the logged-in user.
 | `get_file` | Download a message's media into TG_FILE_ROOT, or with `inline: true` return the image in the tool result for vision-capable clients (requires `TG_ALLOW_INLINE_MEDIA`). |
 | `get_chat_messages` | Fetch recent history from any chat (by id, @user, me, t.me link). Service messages are included, flagged with `service` and an `action` name. |
 | `search_chat_messages` | Search messages in a chat (optional filter: photo/video/document/url/...). |
+| `preview_format` | Render text with a parse_mode **without sending it**: returns the text Telegram will display, the entities and the length. |
 | `send_message` | Send text; optional parse_mode, reply_to_message_id, silent, no_webpage. |
+| `edit_message` | Replace the text, or the media caption, of a message you sent. |
 | `send_file` | Send file from TG_FILE_ROOT; optional caption, parse_mode, as_photo, reply, silent. |
 | `send_screenshot_notification` | Tell a chat that a screenshot was taken. Posts a visible service message. |
 
@@ -94,12 +96,13 @@ server is read-only.
 
 ### Formatting
 
-`send_message` and `send_file` take a `parse_mode`:
+`send_message`, `edit_message` and `send_file` take a `parse_mode`:
 
 | Value | Behaviour |
 | --- | --- |
 | `plain` (default) | Text is sent verbatim; Markdown syntax stays literal. |
 | `markdown` | CommonMark is parsed into Telegram message entities. |
+| `html` | The Bot API HTML subset (`<b>`, `<i>`, `<a href>`, `<code>`, `<pre>`, ...). |
 
 Under `markdown`, `**bold**`, `_italic_`, `~~strike~~`, `` `code` ``, fenced code
 blocks, `[links](url)`, `> quotes`, `tg://user?id=N` mentions and custom emoji
@@ -113,6 +116,13 @@ broken mention.
 
 The default stays `plain` on purpose: flipping it would silently reformat
 messages containing `_` or `*`, which is common in log lines and identifiers.
+
+`preview_format` renders the same pipeline without sending anything, so markup
+can be checked — and a markup error caught — before it reaches a chat. It
+returns the text Telegram will display, the entities with the substring each
+one covers, and the length in UTF-16 units, the unit Telegram limits (4096 for
+a message, 1024 for a caption). The agent footer is included when
+`TG_ATTRIBUTION=footer`, so the preview is the whole message, not just the body.
 
 ### Agent attribution
 

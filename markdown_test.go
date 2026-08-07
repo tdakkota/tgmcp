@@ -43,7 +43,8 @@ func TestStyledTextMode(t *testing.T) {
 		{name: "markdown", mode: "markdown"},
 		{name: "uppercase", mode: "Markdown"},
 		{name: "padded", mode: "  markdown "},
-		{name: "unknown", mode: "html", wantErr: true},
+		{name: "html", mode: "html"},
+		{name: "unknown", mode: "bbcode", wantErr: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := srv.styledText("hi", tt.mode)
