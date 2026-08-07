@@ -53,7 +53,9 @@ type UnreadChannel struct {
 type Message struct {
 	ID        int    `json:"id" jsonschema:"message ID"`
 	Date      string `json:"date" jsonschema:"send time in RFC3339"`
-	Text      string `json:"text" jsonschema:"message text"`
+	Text      string `json:"text" jsonschema:"message text; for a rich message, its blocks rendered as Markdown"`
+	Rich      bool   `json:"rich,omitempty" jsonschema:"true if the message is a rich message: structured blocks such as headings, lists and tables"`
+	Truncated bool   `json:"truncated,omitempty" jsonschema:"true if the rich message was delivered in part and more content exists"`
 	Author    string `json:"author,omitempty" jsonschema:"sender name, for groups"`
 	Out       bool   `json:"out,omitempty" jsonschema:"true if outgoing"`
 	ReplyToID int    `json:"reply_to_id,omitempty" jsonschema:"ID of message being replied to"`
@@ -330,6 +332,13 @@ func messageFromTG(msg *tg.Message, ent entities) Message {
 		Text:   msg.Message,
 		Author: authorName(ent, from, hasFrom),
 		Out:    msg.Out,
+	}
+	if rich, ok := msg.GetRichMessage(); ok {
+		// A rich message keeps its content in page blocks and leaves the flat
+		// text empty, so without rendering it the message reads as blank.
+		m.Text = renderRich(rich.Blocks)
+		m.Rich = true
+		m.Truncated = rich.Part
 	}
 	if rt, ok := msg.GetReplyTo(); ok {
 		if rtm, ok := rt.(*tg.MessageReplyHeader); ok {
