@@ -20,7 +20,6 @@ type PeerInfo struct {
 	Username   string `json:"username,omitempty" jsonschema:"public @username, if any"`
 	FirstName  string `json:"first_name,omitempty" jsonschema:"user first name"`
 	LastName   string `json:"last_name,omitempty" jsonschema:"user last name"`
-	Phone      string `json:"phone,omitempty" jsonschema:"phone number, when visible"`
 	About      string `json:"about,omitempty" jsonschema:"bio for users, description for chats"`
 
 	Bot           bool `json:"bot,omitempty" jsonschema:"true if the user is a bot"`
@@ -122,7 +121,6 @@ func infoFromUser(u *tg.User) PeerInfo {
 		Username:      primaryUsername(u),
 		FirstName:     u.FirstName,
 		LastName:      u.LastName,
-		Phone:         u.Phone,
 		Bot:           u.Bot,
 		Premium:       u.Premium,
 		Verified:      u.Verified,

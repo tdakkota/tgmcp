@@ -274,7 +274,7 @@ func (s *server) register(m *mcp.Server) {
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "get_me",
-		Description: "Get the signed-in Telegram account: id, name, username, phone and bio.",
+		Description: "Get the signed-in Telegram account: id, name, username and bio.",
 	}, s.handleGetMe)
 
 	mcp.AddTool(m, &mcp.Tool{
