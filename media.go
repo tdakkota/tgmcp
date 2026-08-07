@@ -235,6 +235,50 @@ func visionPhotoSize(sizes []tg.PhotoSizeClass) (tg.PhotoSize, bool) {
 	return largest, haveAny
 }
 
+// documentKind names what a document actually is, from its attributes.
+//
+// Everything that is not a photo arrives as a document — a video, a voice
+// message and a PDF alike — so reporting "document" for all of them tells a
+// reader nothing. The names match the kinds [send_file] accepts, so a message
+// can be read and sent back as the same thing.
+func documentKind(doc *tg.Document) string {
+	var (
+		video     *tg.DocumentAttributeVideo
+		audio     *tg.DocumentAttributeAudio
+		animated  bool
+		isSticker bool
+	)
+	for _, attr := range doc.Attributes {
+		switch a := attr.(type) {
+		case *tg.DocumentAttributeVideo:
+			video = a
+		case *tg.DocumentAttributeAudio:
+			audio = a
+		case *tg.DocumentAttributeAnimated:
+			animated = true
+		case *tg.DocumentAttributeSticker, *tg.DocumentAttributeCustomEmoji:
+			isSticker = true
+		}
+	}
+
+	switch {
+	case isSticker:
+		return "sticker"
+	case video != nil && video.RoundMessage:
+		return "video_note"
+	case animated:
+		return "gif"
+	case video != nil:
+		return "video"
+	case audio != nil && audio.Voice:
+		return "voice"
+	case audio != nil:
+		return "audio"
+	default:
+		return "document"
+	}
+}
+
 // documentFileName derives a file name for a document, preferring an
 // explicit DocumentAttributeFilename and falling back to the document ID
 // with an extension guessed from its MIME type.

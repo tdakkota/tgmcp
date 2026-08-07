@@ -170,7 +170,12 @@ type sendFileInput struct {
 	BlobID           string `json:"blob_id,omitempty" jsonschema:"id of a stored object to upload, as returned by get_file or by another MCP server sharing the store; give either this or path"`
 	Caption          string `json:"caption,omitempty" jsonschema:"optional caption"`
 	ParseMode        string `json:"parse_mode,omitempty" jsonschema:"caption format: plain (default, sent as-is), markdown or html"`
-	AsPhoto          bool   `json:"as_photo,omitempty" jsonschema:"send as photo if true"`
+	Kind             string `json:"kind,omitempty" jsonschema:"how Telegram should render it: auto (default, from the MIME type), document, photo, video, gif, audio, voice, video_note or sticker"`
+	DurationSeconds  int    `json:"duration_seconds,omitempty" jsonschema:"duration, for video, gif, audio, voice and video_note; without it the player shows none"`
+	Width            int    `json:"width,omitempty" jsonschema:"pixel width, for video, gif and video_note"`
+	Height           int    `json:"height,omitempty" jsonschema:"pixel height, for video, gif and video_note"`
+	Title            string `json:"title,omitempty" jsonschema:"track title, for audio"`
+	Performer        string `json:"performer,omitempty" jsonschema:"track performer, for audio"`
 	ReplyToMessageID int    `json:"reply_to_message_id,omitempty" jsonschema:"reply to this message id"`
 	Silent           bool   `json:"silent,omitempty" jsonschema:"send without notification"`
 }
@@ -178,6 +183,7 @@ type sendFileInput struct {
 type sendFileOutput struct {
 	OK          bool   `json:"ok" jsonschema:"true on success"`
 	MessageID   int    `json:"message_id,omitempty" jsonschema:"sent message id if known"`
+	Kind        string `json:"kind" jsonschema:"the kind actually sent, with auto resolved"`
 	Attribution string `json:"attribution" jsonschema:"how the caption was marked as agent-sent: off or footer"`
 }
 
@@ -321,7 +327,7 @@ func (s *server) register(m *mcp.Server) {
 
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "send_file",
-			Description: "Send file from configured TG_FILE_ROOT. Supports caption with parse_mode (plain, markdown or html), as_photo, reply_to_message_id, silent.",
+			Description: "Send a file, from TG_FILE_ROOT (path) or the blob store (blob_id). kind picks how Telegram renders it: auto, document, photo, video, gif, audio, voice, video_note, sticker.",
 		}, s.handleSendFile)
 
 		mcp.AddTool(m, &mcp.Tool{
@@ -602,11 +608,19 @@ func (s *server) handleSendFile(ctx context.Context, _ *mcp.CallToolRequest, in 
 		return nil, sendFileOutput{}, errors.New("exactly one of path or blob_id is required")
 	}
 
+	kind, err := parseFileKind(in.Kind)
+	if err != nil {
+		return nil, sendFileOutput{}, err
+	}
+
 	src, err := s.uploadSource(ctx, in)
 	if err != nil {
 		return nil, sendFileOutput{}, err
 	}
 	defer src.release()
+
+	// Only the source knows the MIME type, so "auto" resolves here.
+	kind = kind.resolve(src.mimeType)
 
 	p, err := s.resolvePeer(ctx, in.Chat)
 	if err != nil {
@@ -623,26 +637,14 @@ func (s *server) handleSendFile(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, sendFileOutput{}, err
 	}
-	// Upload first, then describe the result: gotd sets no filename attribute
-	// of its own, and a document without one shows up in Telegram as its
-	// numeric id rather than as the file it is.
+	// Upload first, then describe the result: the attributes decide whether
+	// the same bytes arrive as an attachment, a video or a voice message.
 	f, err := b.Upload(src.option).AsInputFile(ctx)
 	if err != nil {
 		return nil, sendFileOutput{}, errors.Wrap(err, "upload file")
 	}
 
-	var upd tg.UpdatesClass
-	if in.AsPhoto {
-		upd, err = b.Media(ctx, message.UploadedPhoto(f, caption...))
-	} else {
-		doc := message.UploadedDocument(f, caption...).
-			Filename(src.name).
-			ForceFile(true)
-		if src.mimeType != "" {
-			doc = doc.MIME(src.mimeType)
-		}
-		upd, err = b.Media(ctx, doc)
-	}
+	upd, err := b.Media(ctx, kind.mediaOption(f, src, in, caption))
 	if err != nil {
 		return nil, sendFileOutput{}, errors.Wrap(err, "send file")
 	}
@@ -650,6 +652,7 @@ func (s *server) handleSendFile(ctx context.Context, _ *mcp.CallToolRequest, in 
 	return nil, sendFileOutput{
 		OK:          true,
 		MessageID:   id,
+		Kind:        string(kind),
 		Attribution: string(attribution),
 	}, nil
 }

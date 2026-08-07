@@ -262,3 +262,63 @@ func TestVisionPhotoSize(t *testing.T) {
 		t.Errorf("largestPhotoSize = %q, want %q", got.Type, "w")
 	}
 }
+
+// TestDocumentKind checks that a document is named by what it is. Everything
+// that is not a photo arrives as a document, so the attributes are the only
+// thing separating a video from a PDF.
+func TestDocumentKind(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		attrs []tg.DocumentAttributeClass
+		want  string
+	}{
+		{name: "plain", want: "document"},
+		{
+			name:  "video",
+			attrs: []tg.DocumentAttributeClass{&tg.DocumentAttributeVideo{W: 320, H: 320}},
+			want:  "video",
+		},
+		{
+			name:  "round video beats video",
+			attrs: []tg.DocumentAttributeClass{&tg.DocumentAttributeVideo{RoundMessage: true}},
+			want:  "video_note",
+		},
+		{
+			name: "animation beats video",
+			attrs: []tg.DocumentAttributeClass{
+				&tg.DocumentAttributeVideo{},
+				&tg.DocumentAttributeAnimated{},
+			},
+			want: "gif",
+		},
+		{
+			name:  "audio",
+			attrs: []tg.DocumentAttributeClass{&tg.DocumentAttributeAudio{Title: "t"}},
+			want:  "audio",
+		},
+		{
+			name:  "voice beats audio",
+			attrs: []tg.DocumentAttributeClass{&tg.DocumentAttributeAudio{Voice: true}},
+			want:  "voice",
+		},
+		{
+			name: "sticker beats everything",
+			attrs: []tg.DocumentAttributeClass{
+				&tg.DocumentAttributeVideo{},
+				&tg.DocumentAttributeSticker{},
+			},
+			want: "sticker",
+		},
+		{
+			name:  "filename alone is a document",
+			attrs: []tg.DocumentAttributeClass{&tg.DocumentAttributeFilename{FileName: "a.mp4"}},
+			want:  "document",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := documentKind(&tg.Document{Attributes: tt.attrs}); got != tt.want {
+				t.Errorf("documentKind() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

@@ -28,7 +28,7 @@ and unread state as the logged-in user.
 | `preview_format` | Render text with a parse_mode **without sending it**: returns the text Telegram will display, the entities and the length. |
 | `send_message` | Send text; optional parse_mode, reply_to_message_id, silent, no_webpage. |
 | `edit_message` | Replace the text, or the media caption, of a message you sent. Not possible for messages sent in `bot` attribution mode. |
-| `send_file` | Send a file, from TG_FILE_ROOT (`path`) or from the blob store (`blob_id`); optional caption, parse_mode, as_photo, reply, silent. |
+| `send_file` | Send a file, from TG_FILE_ROOT (`path`) or from the blob store (`blob_id`). `kind` picks how Telegram renders it. |
 | `send_screenshot_notification` | Tell a chat that a screenshot was taken. Posts a visible service message. |
 
 ## How it works
@@ -165,6 +165,41 @@ gotd's own loggers are noisier. At debug it prints whole update structs, which
 include message text, so `LOG_LEVEL=debug` already puts some chat content in
 the log regardless of `TG_LOG_PAYLOADS`. Neither is a setting to leave on in a
 deployment whose logs are shipped somewhere.
+
+### File kinds
+
+The same bytes arrive as a plain attachment, a playable video, a looping
+animation or a round video message depending only on the attributes sent with
+them, so `send_file` takes a `kind`:
+
+| Value | Arrives as |
+| --- | --- |
+| `auto` (default) | Inferred from the MIME type, see below. |
+| `document` | A plain attachment, whatever the bytes are. |
+| `photo` | An image, recompressed by Telegram. |
+| `video` | A playable video, streamable. |
+| `gif` | An animation: on Telegram a soundless looping mp4, which a real GIF is converted into. |
+| `audio` | A music track, with `title` and `performer`. |
+| `voice` | A voice message, shown as a waveform. |
+| `video_note` | A round video message. |
+| `sticker` | A sticker. |
+
+`auto` maps `image/gif` to `gif`, other `image/*` to `photo`, `video/*` to
+`video` and `audio/*` to `audio`, and everything else to `document`. It never
+infers `voice`, `video_note` or `sticker`: those say how the sender *means* the
+bytes rather than what they are, and a music track that arrives as a voice
+message is not something the caller can undo. The kind actually used comes back
+in the result, with `auto` resolved.
+
+`duration_seconds`, `width` and `height` are worth passing for video kinds and
+`duration_seconds` for audio ones: Telegram shows no duration and can misplace
+the aspect ratio without them. tgmcp does not probe the file to find out.
+
+Two kinds are **not confirmed working**: `gif` arrives as a plain video and
+`video_note` as a plain video rather than a round one. The request is right —
+`filekind_media_test.go` asserts that `animated`, `nosound_video` and
+`round_message` are all set on the outgoing document — so Telegram is
+downgrading them for a reason not yet identified. Everything else round-trips.
 
 ### Agent attribution
 

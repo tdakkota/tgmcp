@@ -60,7 +60,7 @@ type Message struct {
 	Out       bool   `json:"out,omitempty" jsonschema:"true if outgoing"`
 	ReplyToID int    `json:"reply_to_id,omitempty" jsonschema:"ID of message being replied to"`
 	HasMedia  bool   `json:"has_media,omitempty" jsonschema:"true if the message has downloadable media (see get_file)"`
-	MediaType string `json:"media_type,omitempty" jsonschema:"media kind: photo, document or poll"`
+	MediaType string `json:"media_type,omitempty" jsonschema:"media kind: photo, video, gif, video_note, audio, voice, sticker, document or poll"`
 	FileName  string `json:"file_name,omitempty" jsonschema:"file name of the attached document, if any"`
 	Poll      *Poll  `json:"poll,omitempty" jsonschema:"poll contents and tally, when media_type is poll"`
 	Service   bool   `json:"service,omitempty" jsonschema:"true for service messages, which carry an action instead of text"`
@@ -355,7 +355,7 @@ func messageFromTG(msg *tg.Message, ent entities) Message {
 		case *tg.MessageMediaDocument:
 			if doc, ok := mm.Document.(*tg.Document); ok {
 				m.HasMedia = true
-				m.MediaType = "document"
+				m.MediaType = documentKind(doc)
 				m.FileName = documentFileName(doc)
 			}
 		case *tg.MessageMediaPoll:
