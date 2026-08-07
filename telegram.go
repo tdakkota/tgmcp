@@ -597,7 +597,7 @@ func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache, msgs *mes
 			return nil
 		}
 
-		cache.observeIncoming(id, func() (UnreadChannel, bool) {
+		cache.observeIncoming(pc, func() (UnreadChannel, bool) {
 			c, ok := e.Channels[id]
 			if !ok {
 				return UnreadChannel{}, false
@@ -662,7 +662,7 @@ func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache, msgs *mes
 	})
 
 	d.OnReadChannelInbox(func(_ context.Context, _ tg.Entities, u *tg.UpdateReadChannelInbox) error {
-		cache.setRead(u.ChannelID, u.MaxID, u.StillUnreadCount)
+		cache.setRead(&tg.PeerChannel{ChannelID: u.ChannelID}, u.MaxID, u.StillUnreadCount)
 		if msgs != nil {
 			if err := msgs.pruneRead(u.ChannelID, u.MaxID); err != nil {
 				cache.lg.Warn("Prune buffered messages", zap.Int64("id", u.ChannelID), zap.Error(err))
@@ -678,22 +678,87 @@ func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache, msgs *mes
 		return nil
 	})
 
+	// updateNewMessage covers private chats and legacy groups, the dialogs
+	// updateNewChannelMessage never reports. Without it their unread counts
+	// only ever went down: nothing incremented them after the initial dialog
+	// fetch, so a chat that received messages while the process ran looked
+	// read.
+	d.OnNewMessage(func(_ context.Context, e tg.Entities, u *tg.UpdateNewMessage) error {
+		observeNewMessage(cache, lg, e, u.Message)
+
+		return nil
+	})
+
+	d.OnReadHistoryInbox(func(_ context.Context, _ tg.Entities, u *tg.UpdateReadHistoryInbox) error {
+		cache.setRead(u.Peer, u.MaxID, u.StillUnreadCount)
+
+		lg.Debug("Read history inbox",
+			zap.String("peer", fmt.Sprintf("%T", u.Peer)),
+			zap.Int("max_id", u.MaxID),
+			zap.Int("still_unread", u.StillUnreadCount),
+		)
+
+		return nil
+	})
+
 	d.OnDialogUnreadMark(func(_ context.Context, _ tg.Entities, u *tg.UpdateDialogUnreadMark) error {
 		peer, ok := u.Peer.(*tg.DialogPeer)
 		if !ok {
 			return nil
 		}
-		pc, ok := peer.Peer.(*tg.PeerChannel)
-		if !ok {
-			return nil
-		}
-		cache.setUnreadMark(pc.ChannelID, u.Unread)
+		cache.setUnreadMark(peer.Peer, u.Unread)
 
 		lg.Debug("Dialog unread mark",
-			zap.Int64("channel_id", pc.ChannelID), zap.Bool("unread", u.Unread))
+			zap.String("peer", fmt.Sprintf("%T", peer.Peer)), zap.Bool("unread", u.Unread))
 
 		return nil
 	})
+}
+
+// observeNewMessage records an incoming message in a private chat or a legacy
+// group, so that the cached unread count follows it.
+//
+// The message body is not buffered: the buffer exists to let
+// read_channel_unread answer without an RPC, and that tool serves broadcast
+// channels only. Buffering every direct message would cost memory no reader
+// spends.
+func observeNewMessage(cache *dialogCache, lg *zap.Logger, e tg.Entities, m tg.MessageClass) {
+	var (
+		peerID tg.PeerClass
+		out    bool
+		id     int
+	)
+	switch v := m.(type) {
+	case *tg.Message:
+		peerID, out, id = v.PeerID, v.Out, v.ID
+	case *tg.MessageService:
+		// Counted too: joining a group or pinning a message leaves an unread
+		// message in the dialog like any other.
+		peerID, out, id = v.PeerID, v.Out, v.ID
+	default:
+		return
+	}
+
+	switch peerID.(type) {
+	case *tg.PeerUser, *tg.PeerChat:
+	default:
+		// A channel arrives as updateNewChannelMessage, which counts it. Doing
+		// it here as well would count it twice.
+		return
+	}
+	if out {
+		return
+	}
+
+	ent := peer.EntitiesFromUpdate(e)
+	cache.observeIncoming(peerID, func() (UnreadChannel, bool) {
+		return channelFromEntities(ent, peerID)
+	})
+
+	lg.Debug("New message",
+		zap.String("peer", fmt.Sprintf("%T", peerID)),
+		zap.Int("msg_id", id),
+	)
 }
 
 func parseID(s string) (int64, bool) {

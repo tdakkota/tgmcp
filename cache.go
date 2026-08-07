@@ -186,6 +186,21 @@ func peerCacheKey(p any) (string, bool) {
 	}
 }
 
+// peerKey maps a peer to its cache key. Peers of a kind the cache does not
+// hold, such as a secret chat, report false.
+func peerKey(p tg.PeerClass) (string, bool) {
+	switch v := p.(type) {
+	case *tg.PeerChannel:
+		return dialogKeyParts("channel", v.ChannelID), true
+	case *tg.PeerChat:
+		return dialogKeyParts("chat", v.ChatID), true
+	case *tg.PeerUser:
+		return dialogKeyParts("user", v.UserID), true
+	default:
+		return "", false
+	}
+}
+
 // set upserts a fully-resolved channel and persists it. Used to resync a single
 // channel after a too-long difference.
 func (c *dialogCache) set(ch UnreadChannel) {
@@ -230,9 +245,13 @@ func (c *dialogCache) remove(channelID int64) {
 // resolve channel metadata (from update entities) and the channel is inserted
 // with a single unread message. build may return false when the channel cannot
 // be resolved, in which case the message is dropped.
-func (c *dialogCache) observeIncoming(channelID int64, build func() (UnreadChannel, bool)) {
+func (c *dialogCache) observeIncoming(p tg.PeerClass, build func() (UnreadChannel, bool)) {
+	key, ok := peerKey(p)
+	if !ok {
+		return
+	}
+
 	c.mu.Lock()
-	key := dialogKeyParts("channel", channelID)
 	ch, ok := c.channels[key]
 	if ok {
 		ch.UnreadCount++
@@ -251,8 +270,8 @@ func (c *dialogCache) observeIncoming(channelID int64, build func() (UnreadChann
 
 // setRead applies a read-inbox update: messages up to maxID are read and
 // stillUnread messages remain. Unknown channels are ignored.
-func (c *dialogCache) setRead(channelID int64, maxID, stillUnread int) {
-	c.update(channelID, func(ch *UnreadChannel) {
+func (c *dialogCache) setRead(p tg.PeerClass, maxID, stillUnread int) {
+	c.updatePeer(p, func(ch *UnreadChannel) {
 		ch.readInboxMaxID = maxID
 		if stillUnread >= 0 {
 			ch.UnreadCount = stillUnread
@@ -263,8 +282,8 @@ func (c *dialogCache) setRead(channelID int64, maxID, stillUnread int) {
 
 // setUnreadMark applies a manual unread mark toggle. Unknown channels are
 // ignored.
-func (c *dialogCache) setUnreadMark(channelID int64, mark bool) {
-	c.update(channelID, func(ch *UnreadChannel) {
+func (c *dialogCache) setUnreadMark(p tg.PeerClass, mark bool) {
+	c.updatePeer(p, func(ch *UnreadChannel) {
 		ch.UnreadMark = mark
 	})
 }
@@ -283,10 +302,15 @@ func (c *dialogCache) markReadPeer(p any) {
 	})
 }
 
-// update applies mutate to a cached channel under lock and persists the result.
-// Unknown channels are ignored.
-func (c *dialogCache) update(channelID int64, mutate func(*UnreadChannel)) {
-	c.updateKey(dialogKeyParts("channel", channelID), mutate)
+// updatePeer applies mutate to the cached dialog of a peer and persists the
+// result. Unknown dialogs are ignored.
+func (c *dialogCache) updatePeer(p tg.PeerClass, mutate func(*UnreadChannel)) {
+	key, ok := peerKey(p)
+	if !ok {
+		return
+	}
+
+	c.updateKey(key, mutate)
 }
 
 // updateKey applies mutate to the dialog stored under key and persists the
