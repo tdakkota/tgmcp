@@ -218,6 +218,62 @@ func (c *dialogCache) set(ch UnreadChannel) {
 	c.persist(ch)
 }
 
+// learn upserts the metadata an update revealed about a channel and reports
+// whether anything changed. Counters are left alone: they belong to the
+// handlers that track reads and incoming messages, and a rename says nothing
+// about them.
+//
+// The comparison holds the same lock as the write. Reading the entry first and
+// writing it back after would let a concurrent unread increment land in between
+// and be overwritten, and would let two updates for one channel both decide it
+// was unknown.
+//
+// Returning early on an unchanged entry is what makes this safe to call from
+// updateChannel, which fires on any change to any channel: without it every
+// update would write a dialog to disk.
+func (c *dialogCache) learn(fresh UnreadChannel) bool {
+	key := dialogCacheKey(fresh)
+
+	c.mu.Lock()
+	old, known := c.channels[key]
+	if known && sameChannelMeta(old, fresh) {
+		c.mu.Unlock()
+
+		return false
+	}
+	if known {
+		old.Title = fresh.Title
+		old.Username = fresh.Username
+		old.Type = fresh.Type
+		old.peer = fresh.peer
+		fresh = old
+	}
+	c.channels[key] = fresh
+	c.mu.Unlock()
+
+	// Outside the lock: the store writes to disk, and the map is the
+	// authoritative copy either way.
+	c.persist(fresh)
+
+	return true
+}
+
+// sameChannelMeta reports whether an update carries nothing new. The access
+// hash counts: it addresses the chat, so a rotation matters even when the
+// visible metadata is identical.
+func sameChannelMeta(a, b UnreadChannel) bool {
+	if a.Title != b.Title || a.Username != b.Username || a.Type != b.Type {
+		return false
+	}
+	ap, aok := a.peer.(*tg.InputPeerChannel)
+	bp, bok := b.peer.(*tg.InputPeerChannel)
+	if aok && bok {
+		return ap.AccessHash == bp.AccessHash
+	}
+
+	return aok == bok
+}
+
 // remove drops a channel from the cache and the store. Used when the channel is
 // no longer accessible (e.g. CHANNEL_PRIVATE: we were kicked, banned, or it went
 // private).

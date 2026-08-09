@@ -699,13 +699,9 @@ func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache, msgs *mes
 		if !ok {
 			return nil
 		}
-		// Only for channels the cache lacks. Replacing a known entry would
-		// reset the unread counts this cache exists to hold.
-		if _, known := cache.get(u.ChannelID); known {
-			return nil
+		if cache.learn(channelFromEntity(c)) {
+			lg.Debug("Learned channel", zap.Int64("channel_id", u.ChannelID), zap.String("title", c.Title))
 		}
-		cache.set(channelFromEntity(c))
-		lg.Debug("Learned channel", zap.Int64("channel_id", u.ChannelID), zap.String("title", c.Title))
 
 		return nil
 	})
