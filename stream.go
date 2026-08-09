@@ -10,9 +10,8 @@ import (
 )
 
 type startStreamInput struct {
-	Chat   string `json:"chat" jsonschema:"chat target: a channel or group where you may manage video chats"`
-	Title  string `json:"title,omitempty" jsonschema:"title shown to viewers"`
-	Revoke bool   `json:"revoke,omitempty" jsonschema:"replace the stream key before returning it, which breaks any encoder still using the old one; requires owning the chat, admin rights are not enough"`
+	Chat  string `json:"chat" jsonschema:"chat target: a channel or group where you may manage video chats"`
+	Title string `json:"title,omitempty" jsonschema:"title shown to viewers"`
 }
 
 type startStreamOutput struct {
@@ -22,6 +21,14 @@ type startStreamOutput struct {
 	// Created separates "this call started it" from "one was already running",
 	// which matters because the key comes back either way and reads identically.
 	Created bool `json:"created" jsonschema:"true if this call started the stream; false if a call was already live and the key addresses that one"`
+}
+
+type revokeStreamKeyInput struct {
+	Chat string `json:"chat" jsonschema:"chat target whose stream key should be replaced"`
+}
+
+type revokeStreamKeyOutput struct {
+	OK bool `json:"ok" jsonschema:"true on success"`
 }
 
 type stopStreamInput struct {
@@ -59,14 +66,42 @@ func (s *server) handleStartStream(ctx context.Context, _ *mcp.CallToolRequest, 
 	// Fetched after creating, so a failed create does not hand out a key for a
 	// stream that never started.
 	rtmp, err := s.api.PhoneGetGroupCallStreamRtmpURL(ctx, &tg.PhoneGetGroupCallStreamRtmpURLRequest{
-		Peer:   p,
-		Revoke: in.Revoke,
+		Peer: p,
 	})
 	if err != nil {
 		return nil, startStreamOutput{}, errors.Wrap(err, "phone.getGroupCallStreamRtmpUrl")
 	}
 
 	return nil, startStreamOutput{OK: true, URL: rtmp.URL, Key: rtmp.Key, Created: created}, nil
+}
+
+// handleRevokeStreamKey replaces the chat's stream key and reports nothing but
+// success.
+//
+// The same RPC returns the replacement, and start_stream used to hand it back.
+// That made rotation self-defeating: every revocation published a fresh secret
+// into the transcript that the next reader could use. Dropping the response is
+// the whole point of the tool, so the caller has to fetch the new key
+// deliberately, by starting a stream, rather than as a side effect of burning
+// the old one.
+func (s *server) handleRevokeStreamKey(ctx context.Context, _ *mcp.CallToolRequest, in revokeStreamKeyInput) (*mcp.CallToolResult, revokeStreamKeyOutput, error) {
+	if in.Chat == "" {
+		return nil, revokeStreamKeyOutput{}, errors.New("chat is required")
+	}
+
+	p, err := s.resolvePeer(ctx, in.Chat)
+	if err != nil {
+		return nil, revokeStreamKeyOutput{}, err
+	}
+
+	if _, err := s.api.PhoneGetGroupCallStreamRtmpURL(ctx, &tg.PhoneGetGroupCallStreamRtmpURLRequest{
+		Peer:   p,
+		Revoke: true,
+	}); err != nil {
+		return nil, revokeStreamKeyOutput{}, errors.Wrap(err, "phone.getGroupCallStreamRtmpUrl")
+	}
+
+	return nil, revokeStreamKeyOutput{OK: true}, nil
 }
 
 func (s *server) handleStopStream(ctx context.Context, _ *mcp.CallToolRequest, in stopStreamInput) (*mcp.CallToolResult, stopStreamOutput, error) {

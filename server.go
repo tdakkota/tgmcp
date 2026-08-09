@@ -376,13 +376,20 @@ func (s *server) register(m *mcp.Server) {
 			Name: "start_stream",
 			Description: "Start a live stream in a channel or group and return the RTMP url and key to push frames to, " +
 				"e.g. ffmpeg -re -i input.mp4 -c copy -f flv \"<url><key>\". " +
-				"Needs the right to manage video chats. The key belongs to the chat and outlives the stream; pass revoke to replace it.",
+				"Needs the right to manage video chats. The key belongs to the chat and outlives the stream, so treat it as a secret: " +
+				"anyone holding it can broadcast to the chat the next time a stream runs. Use revoke_stream_key to burn one that leaked.",
 		}, s.handleStartStream)
 
 		mcp.AddTool(m, &mcp.Tool{
 			Name:        "stop_stream",
 			Description: "End the live stream, or any video chat, running in a chat. Succeeds with stopped=false if nothing was live.",
 		}, s.handleStopStream)
+
+		mcp.AddTool(m, &mcp.Tool{
+			Name: "revoke_stream_key",
+			Description: "Replace a chat's RTMP stream key without disclosing the replacement, breaking any encoder still pushing with the old one. " +
+				"Requires owning the chat; admin rights are not enough. Call start_stream to obtain the new key.",
+		}, s.handleRevokeStreamKey)
 	}
 
 	if s.allowProfileEdit {
