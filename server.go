@@ -371,6 +371,18 @@ func (s *server) register(m *mcp.Server) {
 			Name:        "send_inline_result",
 			Description: "Send a result from an inline bot, which marks the message 'via @bot'. Defaults to the first result.",
 		}, s.handleSendInlineResult)
+
+		mcp.AddTool(m, &mcp.Tool{
+			Name: "start_stream",
+			Description: "Start a live stream in a channel or group and return the RTMP url and key to push frames to, " +
+				"e.g. ffmpeg -re -i input.mp4 -c copy -f flv \"<url><key>\". " +
+				"Needs the right to manage video chats. The key belongs to the chat and outlives the stream; pass revoke to replace it.",
+		}, s.handleStartStream)
+
+		mcp.AddTool(m, &mcp.Tool{
+			Name:        "stop_stream",
+			Description: "End the live stream, or any video chat, running in a chat. Succeeds with stopped=false if nothing was live.",
+		}, s.handleStopStream)
 	}
 
 	if s.allowProfileEdit {
