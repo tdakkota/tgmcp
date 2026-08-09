@@ -302,21 +302,30 @@ func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry)
 		g.Go(func() error {
 			return mgr.Run(ctx, client.API(), self.ID, updates.AuthOptions{
 				OnStart: func(ctx context.Context) {
-					// Seed the cache from persistent storage. Only fetch the
-					// full dialog list when nothing is persisted (first run);
-					// on later starts the updates manager reconciles the
-					// persisted cache via getDifference.
+					// Seed from persistent storage first, so the cache is
+					// usable even if the refetch below fails.
 					n, err := cache.loadFromStore()
 					if err != nil {
 						lg.Error("Load persisted dialogs", zap.Error(err))
 					}
-					if n == 0 {
-						if err := bootstrapDialogs(ctx, client.API(), cache); err != nil {
-							lg.Error("Bootstrap dialogs", zap.Error(err))
+					if n > 0 {
+						lg.Info("Loaded persisted dialogs", zap.Int("count", n))
+					}
+
+					// Then refetch, on every start rather than only the first.
+					// getDifference reports activity on dialogs already known;
+					// it never enumerates one joined since, and the update
+					// handlers drop the traffic that would introduce it
+					// anyway: own messages, service messages and supergroups.
+					// Without this the cache is a snapshot of whenever the
+					// store was first written.
+					if err := bootstrapDialogs(ctx, client.API(), cache); err != nil {
+						lg.Error("Bootstrap dialogs", zap.Error(err))
+						if n == 0 {
 							return
 						}
 					} else {
-						lg.Info("Loaded persisted dialogs", zap.Int("count", n))
+						lg.Info("Refreshed dialogs", zap.Int("count", cache.len()))
 					}
 					lg.Info("Authorized, serving MCP over HTTP", zap.String("addr", cfg.HTTPAddr))
 				},

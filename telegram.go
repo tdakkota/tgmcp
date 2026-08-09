@@ -689,6 +689,27 @@ func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache, msgs *mes
 		return nil
 	})
 
+	// updateChannel says only that something about a channel changed: the id is
+	// the entire payload. When the updates container happens to carry the
+	// entity as well, that is enough to learn a channel the cache has never
+	// seen, such as one just created, without spending an RPC. When it does
+	// not, drop it: the next start refetches the dialog list anyway.
+	d.OnChannel(func(_ context.Context, e tg.Entities, u *tg.UpdateChannel) error {
+		c, ok := e.Channels[u.ChannelID]
+		if !ok {
+			return nil
+		}
+		// Only for channels the cache lacks. Replacing a known entry would
+		// reset the unread counts this cache exists to hold.
+		if _, known := cache.get(u.ChannelID); known {
+			return nil
+		}
+		cache.set(channelFromEntity(c))
+		lg.Debug("Learned channel", zap.Int64("channel_id", u.ChannelID), zap.String("title", c.Title))
+
+		return nil
+	})
+
 	d.OnReadHistoryInbox(func(_ context.Context, _ tg.Entities, u *tg.UpdateReadHistoryInbox) error {
 		cache.setRead(u.Peer, u.MaxID, u.StillUnreadCount)
 

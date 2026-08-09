@@ -117,6 +117,13 @@ func (c *dialogCache) all() []UnreadChannel {
 	return out
 }
 
+func (c *dialogCache) len() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return len(c.channels)
+}
+
 // find resolves a cached channel by numeric ID or @username.
 func (c *dialogCache) find(target string) (UnreadChannel, bool) {
 	target = strings.TrimPrefix(strings.TrimSpace(target), "@")
