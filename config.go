@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/go-faster/errors"
+	"github.com/go-faster/gooners/mcpauth"
+	"github.com/go-faster/gooners/mcpcmd"
 	"github.com/joho/godotenv"
 )
 
@@ -45,6 +47,13 @@ type Config struct {
 	BlobS3Bucket   string
 	BlobS3Prefix   string
 	BlobS3Region   string
+
+	// Transport is how the MCP endpoint is served: the listener, TLS, and the
+	// optional tunnel that publishes it. See [loadServeConfig].
+	Transport mcpcmd.TransportFlags
+	// Auth guards that endpoint. Disabled by default, which is only safe while
+	// Transport keeps it on loopback.
+	Auth mcpauth.Config
 }
 
 // LoadConfig reads configuration from the environment, optionally sourcing a
@@ -77,6 +86,18 @@ type Config struct {
 //	                   unset disables it and get_file inline fails with a clear error
 //	TG_BLOB_DIR      - where stored objects live (default: <session>/blob)
 //	TG_BLOB_TTL      - how long a URL works (default: 15m)
+//
+// Serving the MCP endpoint, see [loadServeConfig]:
+//
+//	MCP_AUTH_TOKEN   - credential callers must present; unset serves the endpoint
+//	                   to anyone who reaches it, which is safe only on loopback
+//	MCP_AUTH_HEADER  - header carrying it (default: "Authorization", as "Bearer <token>")
+//	MCP_TLS_CERT_FILE, MCP_TLS_KEY_FILE       - serve HTTPS instead of HTTP
+//	MCP_TLS_CLIENT_CA_FILE                    - additionally require a client certificate
+//	MCP_EXPOSE_PROVIDER                       - publish through a tunnel: "cloudflared"
+//	MCP_EXPOSE_CONFIG, MCP_EXPOSE_NAME        - cloudflared config file and tunnel name
+//	MCP_EXPOSE_TYPE                           - tunnel type (default: "http")
+//	MCP_DISABLE_LOCALHOST_PROTECTION          - "true" when reached through a tunnel
 //
 // Telemetry is configured by the standard OTEL_* variables read by
 // [github.com/go-faster/sdk/app], see README.
@@ -179,6 +200,10 @@ func LoadConfig() (Config, error) {
 
 	if cfg.Attribution == attributionBot && cfg.BotToken == "" && cfg.BotUsername == "" {
 		return Config{}, errors.New("TG_ATTRIBUTION=bot requires TG_BOT_TOKEN or TG_BOT_USERNAME")
+	}
+
+	if err := loadServeConfig(&cfg); err != nil {
+		return Config{}, err
 	}
 
 	return cfg, nil

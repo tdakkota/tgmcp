@@ -90,6 +90,14 @@ tool call. Instead, mirroring [tdlib](https://github.com/tdlib/td)'s strategy:
 | `TG_BOT_USERNAME` | no | — | Echo bot `@username`. Read from the identity the running bot publishes when unset. |
 | `TG_BOT_ALLOWED_USERS` | no | — | Extra user IDs allowed to claim inline payloads, comma-separated. The spooling account is always allowed. |
 | `TG_LOG_PAYLOADS` | no | off | `true` writes MCP request and response bodies to the debug log. That is the contents of chats — see [What is logged](#what-is-logged). |
+| `MCP_AUTH_TOKEN` | no | — | Credential callers must present. Unset serves the endpoint to anyone who reaches it — see [Reaching the endpoint](#reaching-the-endpoint). |
+| `MCP_AUTH_HEADER` | no | `Authorization` | Header carrying the token, as `Bearer <token>`. Any other header carries it bare. |
+| `MCP_TLS_CERT_FILE`, `MCP_TLS_KEY_FILE` | no | — | Serve HTTPS instead of HTTP. |
+| `MCP_TLS_CLIENT_CA_FILE` | no | — | Additionally require a client certificate signed by this CA. |
+| `MCP_EXPOSE_PROVIDER` | no | — | Publish through a tunnel: `cloudflared`. Requires `MCP_AUTH_TOKEN`. |
+| `MCP_EXPOSE_CONFIG`, `MCP_EXPOSE_NAME` | no | — | cloudflared config file and named tunnel. |
+| `MCP_EXPOSE_TYPE` | no | `http` | Tunnel type. |
+| `MCP_DISABLE_LOCALHOST_PROTECTION` | no | off | `true` when the server is reached through a tunnel rather than directly. |
 
 Every right is **opt-in** and granted only by the literal string `true`:
 anything else, including `1` and `TRUE`, leaves it off. Without any of them the
@@ -407,6 +415,40 @@ Point your MCP client at the HTTP endpoint (adjust the address to `MCP_ADDR`):
   }
 }
 ```
+
+### Reaching the endpoint
+
+There is no authentication by default. Anything that can open `MCP_ADDR` calls
+tools as the logged-in account, so the default `127.0.0.1` bind is the access
+control: keep it, or replace it with something.
+
+`MCP_AUTH_TOKEN` is that something. Set it and every MCP request must carry the
+token, which your client sends as a header:
+
+```json
+{
+  "mcpServers": {
+    "telegram": {
+      "type": "http",
+      "url": "http://127.0.0.1:8080",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+The blob endpoint stays open when auth is on. Its URLs are the capability, and
+they are already unguessable and short-lived; a browser opening one carries no
+MCP credential.
+
+`MCP_EXPOSE_PROVIDER=cloudflared` publishes the server through a tunnel, which
+is why it refuses to start without `MCP_AUTH_TOKEN`: the loopback bind that was
+protecting it no longer applies. Add `MCP_DISABLE_LOCALHOST_PROTECTION=true`
+when going through a tunnel, and prefer `MCP_TLS_CLIENT_CA_FILE` over a bearer
+token if you can issue certificates.
+
+`/health` and `/readyz` answer without a credential. The first says the process
+is up, the second that it has loaded its dialogs and can serve.
 
 ## Notes
 

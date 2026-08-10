@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/go-faster/errors v0.8.0
-	github.com/go-faster/gooners v0.8.0-alpha.v3
+	github.com/go-faster/gooners v0.8.0-alpha.v4.0.20260810084615-027a7ea01477
 	github.com/go-faster/sdk v0.38.0
 	github.com/gotd/contrib v0.25.0
 	github.com/gotd/log/logzap v0.1.1

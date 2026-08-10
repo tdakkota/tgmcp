@@ -15,17 +15,21 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"time"
+	"sync/atomic"
 
 	"github.com/go-faster/errors"
 	"github.com/go-faster/sdk/app"
 	"github.com/gotd/contrib/bbolt"
 	"github.com/gotd/log/logzap"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/samber/slog-zap/v2"
+	slogzap "github.com/samber/slog-zap/v2"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/go-faster/gooners/mcpauth"
+	"github.com/go-faster/gooners/mcpcmd"
+	_ "github.com/go-faster/gooners/tunnel/cloudflared"
 
 	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
@@ -262,37 +266,42 @@ func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry)
 		srv.register(m)
 		m.AddReceivingMiddleware(instrument.Middleware())
 
-		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
-			return m
-		}, nil)
-
-		mux := http.NewServeMux()
-		mux.Handle("/", handler)
 		// Serve stored media alongside MCP, so a client can fetch a file the
-		// tool result only linked to.
+		// tool result only linked to. It is deliberately outside the auth
+		// middleware: the URL is the capability, and a browser opening it
+		// carries no MCP credential.
+		routes := map[string]http.Handler{}
 		if h, ok := blobs.(http.Handler); ok {
 			path, err := blobMountPath(cfg.BlobBaseURL)
 			if err != nil {
 				return err
 			}
-			mux.Handle(path, h)
+			routes[path] = h
 			lg.Info("Serving blobs", zap.String("path", path), zap.String("base_url", cfg.BlobBaseURL))
 		}
 
-		httpSrv := &http.Server{
-			Addr:              cfg.HTTPAddr,
-			Handler:           instrumentHTTP(lg, t, mux),
-			ReadHeaderTimeout: 10 * time.Second,
+		auth := mcpauth.Middleware(cfg.Auth, mcpauth.Options{Name: "tgmcp"})
+		if auth == nil {
+			lg.Warn("MCP endpoint is unauthenticated, anyone who reaches it acts as this account",
+				zap.String("addr", cfg.HTTPAddr))
+		} else {
+			lg.Info("Requiring credential on MCP endpoint", zap.String("header", cfg.Auth.Header))
 		}
 
-		go func() {
-			<-ctx.Done()
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := httpSrv.Shutdown(shutdownCtx); err != nil {
-				lg.Error("Shutdown MCP HTTP server", zap.Error(err))
+		// Telemetry wraps auth rather than the other way round, so a rejected
+		// request is still counted and logged. Neither wraps the health probes.
+		middleware := func(next http.Handler) http.Handler {
+			if auth != nil {
+				next = auth(next)
 			}
-		}()
+
+			return instrumentHTTP(lg, t, next)
+		}
+
+		// The listener comes up before the dialog cache is seeded, so a tool
+		// call can arrive against an empty one. /readyz is what keeps a proxy
+		// from routing to it that early; the process is healthy either way.
+		var seeded atomic.Bool
 
 		g, ctx := errgroup.WithContext(ctx)
 
@@ -327,13 +336,27 @@ func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry)
 					} else {
 						lg.Info("Refreshed dialogs", zap.Int("count", cache.len()))
 					}
+					seeded.Store(true)
 					lg.Info("Authorized, serving MCP over HTTP", zap.String("addr", cfg.HTTPAddr))
 				},
 			})
 		})
 
 		g.Go(func() error {
-			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := cfg.Transport.Run(ctx, mcpcmd.RunOptions{
+				Name:       "tgmcp",
+				Handler:    func(*http.Request) *mcp.Server { return m },
+				Middleware: middleware,
+				Routes:     routes,
+				Ready: func() error {
+					if !seeded.Load() {
+						return errors.New("dialog cache is not seeded yet")
+					}
+
+					return nil
+				},
+				Logger: slog.New(slogzap.Option{Logger: lg.Named("http")}.NewZapHandler()),
+			}); err != nil {
 				return errors.Wrap(err, "http serve")
 			}
 
