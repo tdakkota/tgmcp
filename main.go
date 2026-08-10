@@ -305,6 +305,20 @@ func runServe(ctx context.Context, cfg Config, lg *zap.Logger, t *app.Telemetry)
 
 		g, ctx := errgroup.WithContext(ctx)
 
+		// The echo bot is a second Telegram account in the same process: it
+		// logs in with the bot token while everything else uses the user
+		// session. Running it here rather than beside the server keeps the two
+		// on one lifecycle, which is what stopped them drifting apart.
+		//
+		// A username without a token means the bot is somebody else's to run.
+		if cfg.Attribution == attributionBot && cfg.BotToken != "" {
+			g.Go(func() error {
+				superviseEchoBot(ctx, cfg, lg.Named("echobot"))
+
+				return nil
+			})
+		}
+
 		// Run the updates manager: it loads the persisted state, seeds the
 		// dialog cache once via OnStart, then keeps it live, recovering gaps
 		// with getDifference.

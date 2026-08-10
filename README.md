@@ -237,19 +237,27 @@ them from messages you typed. `TG_ATTRIBUTION` picks how they are marked:
 | `footer` | Appends `TG_AGENT_FOOTER` as an italic line after the message. |
 | `bot` | Routes the message through an inline echo bot, so Telegram renders a **via @bot** header on it. |
 
-`bot` mode needs a second process:
-
-```sh
-tgmcp echobot   # alongside `tgmcp serve`
-```
-
 Set `TG_BOT_TOKEN` to a bot from [@BotFather][botfather] and enable inline mode
 for it (`/setinline`) — without that, every inline query is rejected and
-attribution never reaches `bot`. The bot stores its session under
+attribution never reaches `bot`. `serve` then runs the bot itself, as a second
+Telegram account in the same process: the bot stores its session under
 `<TG_SESSION_DIR>/bot/` and publishes its username to
-`<TG_SESSION_DIR>/echobot.json` on startup, which is how `serve` addresses it.
-Set `TG_BOT_USERNAME` to skip that lookup; the token alone is not enough, since
-a bot that is not already a dialog cannot be resolved by numeric ID.
+`<TG_SESSION_DIR>/echobot.json` on startup. Set `TG_BOT_USERNAME` to skip that
+lookup; the token alone is not enough, since a bot that is not already a dialog
+cannot be resolved by numeric ID.
+
+The bot is supervised and restarted, and can never stop the MCP server: `bot`
+mode degrades to the footer when the bot is unavailable, unless
+`TG_ATTRIBUTION_STRICT` says to fail the send instead.
+
+```sh
+tgmcp echobot   # only when the bot runs somewhere else than serve
+```
+
+The subcommand is still there for the case `serve` cannot cover: a bot driven by
+one account and shared with others, which set `TG_BOT_USERNAME` and no token so
+they address it without trying to run it. Run standalone, a failure to start is
+an exit code rather than a log line.
 
 [botfather]: https://t.me/BotFather
 

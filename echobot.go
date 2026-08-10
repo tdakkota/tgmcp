@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/go-faster/errors"
 	"go.uber.org/zap"
@@ -100,6 +101,64 @@ func readEchoBotIdentity(sessionDir string) (echoBotIdentity, error) {
 	}
 
 	return id, nil
+}
+
+// Bounds on how long the supervisor waits before restarting the bot. The first
+// retry is quick because the usual cause is a connection that dropped; the cap
+// keeps a bot that cannot authenticate at all from reconnecting in a loop.
+const (
+	echoBotMinRetry = time.Second
+	echoBotMaxRetry = time.Minute
+)
+
+// superviseEchoBot runs the echo bot until ctx ends, restarting it whenever it
+// stops, and never reports an error.
+//
+// It is what lets the bot share a process with the MCP server. Attribution is
+// best effort by design, with the footer as the fallback, so a bot that cannot
+// start must degrade to that rather than take the server down with it. Run as
+// its own command instead, a failure is the operator's to see and the exit code
+// says so.
+func superviseEchoBot(ctx context.Context, cfg Config, lg *zap.Logger) {
+	supervise(ctx, lg, func(ctx context.Context) error {
+		return runEchoBot(ctx, cfg, lg)
+	})
+}
+
+// supervise restarts run with a backoff that doubles up to [echoBotMaxRetry],
+// returning only when ctx ends.
+func supervise(ctx context.Context, lg *zap.Logger, run func(context.Context) error) {
+	delay := echoBotMinRetry
+	for {
+		start := time.Now()
+		err := run(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+
+		// A run that stayed up was not part of a crash loop, so the next
+		// failure starts over from the shortest delay instead of inheriting a
+		// backoff earned hours ago.
+		if time.Since(start) >= echoBotMaxRetry {
+			delay = echoBotMinRetry
+		}
+
+		lg.Warn("Echo bot stopped, restarting",
+			zap.Duration("in", delay),
+			zap.Error(err),
+		)
+
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+
+			return
+		case <-timer.C:
+		}
+
+		delay = min(delay*2, echoBotMaxRetry)
+	}
 }
 
 // runEchoBot logs in with the bot token and answers inline queries with the
